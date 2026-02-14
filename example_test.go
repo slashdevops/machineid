@@ -1,6 +1,7 @@
 package machineid_test
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/slashdevops/machineid"
@@ -12,7 +13,7 @@ func ExampleNew() {
 		WithCPU().
 		WithSystemUUID()
 
-	id, err := provider.ID()
+	id, err := provider.ID(context.Background())
 	if err != nil {
 		fmt.Printf("error: %v\n", err)
 		return
@@ -25,17 +26,19 @@ func ExampleNew() {
 
 // ExampleProvider_WithSalt shows how a salt produces application-specific IDs.
 func ExampleProvider_WithSalt() {
+	ctx := context.Background()
+
 	id1, _ := machineid.New().
 		WithCPU().
 		WithSystemUUID().
 		WithSalt("app-one").
-		ID()
+		ID(ctx)
 
 	id2, _ := machineid.New().
 		WithCPU().
 		WithSystemUUID().
 		WithSalt("app-two").
-		ID()
+		ID(ctx)
 
 	fmt.Printf("Same length: %v\n", len(id1) == len(id2))
 	fmt.Printf("Different IDs: %v\n", id1 != id2)
@@ -46,12 +49,13 @@ func ExampleProvider_WithSalt() {
 
 // ExampleProvider_WithFormat demonstrates the four power-of-two output formats.
 func ExampleProvider_WithFormat() {
+	ctx := context.Background()
 	base := func(mode machineid.FormatMode) int {
 		id, err := machineid.New().
 			WithCPU().
 			WithSystemUUID().
 			WithFormat(mode).
-			ID()
+			ID(ctx)
 		if err != nil {
 			return -1
 		}
@@ -75,14 +79,14 @@ func ExampleProvider_Validate() {
 		WithCPU().
 		WithSystemUUID()
 
-	id, _ := provider.ID()
+	id, _ := provider.ID(context.Background())
 
 	// Validate the correct ID
-	valid, _ := provider.Validate(id)
+	valid, _ := provider.Validate(context.Background(), id)
 	fmt.Printf("Correct ID valid: %v\n", valid)
 
 	// Validate an incorrect ID
-	valid, _ = provider.Validate("0000000000000000000000000000000000000000000000000000000000000000")
+	valid, _ = provider.Validate(context.Background(), "0000000000000000000000000000000000000000000000000000000000000000")
 	fmt.Printf("Wrong ID valid: %v\n", valid)
 
 	// Output:
@@ -97,7 +101,7 @@ func ExampleProvider_Diagnostics() {
 		WithCPU().
 		WithSystemUUID()
 
-	_, _ = provider.ID()
+	_, _ = provider.ID(context.Background())
 
 	diag := provider.Diagnostics()
 	if diag == nil {
@@ -116,7 +120,7 @@ func ExampleProvider_Diagnostics() {
 func ExampleProvider_VMFriendly_preset() {
 	id, err := machineid.New().
 		VMFriendly().
-		ID()
+		ID(context.Background())
 	if err != nil {
 		fmt.Printf("error: %v\n", err)
 		return
@@ -137,7 +141,7 @@ func ExampleProvider_ID_allComponents() {
 		WithDisk().
 		WithSalt("full-example")
 
-	id, err := provider.ID()
+	id, err := provider.ID(context.Background())
 	if err != nil {
 		fmt.Printf("error: %v\n", err)
 		return

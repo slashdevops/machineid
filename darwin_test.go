@@ -3,6 +3,7 @@
 package machineid
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -71,7 +72,7 @@ func TestMacOSHardwareUUIDViaIORegNotFound(t *testing.T) {
 	mock := newMockExecutor()
 	mock.setOutput("ioreg", "some output without UUID")
 
-	_, err := macOSHardwareUUIDViaIOReg(mock)
+	_, err := macOSHardwareUUIDViaIOReg(context.Background(), mock)
 	if err == nil {
 		t.Error("Expected error when UUID not found in ioreg output")
 	}
@@ -82,7 +83,7 @@ func TestMacOSHardwareUUIDViaIORegError(t *testing.T) {
 	mock := newMockExecutor()
 	mock.setError("ioreg", fmt.Errorf("command failed"))
 
-	_, err := macOSHardwareUUIDViaIOReg(mock)
+	_, err := macOSHardwareUUIDViaIOReg(context.Background(), mock)
 	if err == nil {
 		t.Error("Expected error when ioreg command fails")
 	}
@@ -99,7 +100,7 @@ func TestMacOSHardwareUUIDViaIORegSuccess(t *testing.T) {
 	`
 	mock.setOutput("ioreg", ioregOutput)
 
-	result, err := macOSHardwareUUIDViaIOReg(mock)
+	result, err := macOSHardwareUUIDViaIOReg(context.Background(), mock)
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
 	}
@@ -113,7 +114,7 @@ func TestMacOSSerialNumberViaIORegError(t *testing.T) {
 	mock := newMockExecutor()
 	mock.setError("ioreg", fmt.Errorf("command failed"))
 
-	_, err := macOSSerialNumberViaIOReg(mock)
+	_, err := macOSSerialNumberViaIOReg(context.Background(), mock)
 	if err == nil {
 		t.Error("Expected error when ioreg command fails")
 	}
@@ -124,7 +125,7 @@ func TestMacOSSerialNumberViaIORegNotFound(t *testing.T) {
 	mock := newMockExecutor()
 	mock.setOutput("ioreg", "output without serial")
 
-	_, err := macOSSerialNumberViaIOReg(mock)
+	_, err := macOSSerialNumberViaIOReg(context.Background(), mock)
 	if err == nil {
 		t.Error("Expected error when serial not found")
 	}
@@ -138,7 +139,7 @@ func TestMacOSSerialNumberViaIORegSuccess(t *testing.T) {
 	`
 	mock.setOutput("ioreg", ioregOutput)
 
-	result, err := macOSSerialNumberViaIOReg(mock)
+	result, err := macOSSerialNumberViaIOReg(context.Background(), mock)
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
 	}
@@ -153,7 +154,7 @@ func TestMacOSSerialNumberFallback(t *testing.T) {
 	mock.setError("system_profiler", fmt.Errorf("system_profiler failed"))
 	mock.setOutput("ioreg", `"IOPlatformSerialNumber" = "C02FALLBACK"`)
 
-	result, err := macOSSerialNumber(mock)
+	result, err := macOSSerialNumber(context.Background(), mock)
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
 	}
@@ -168,7 +169,7 @@ func TestMacOSCPUInfoError(t *testing.T) {
 	mock.setError("sysctl", fmt.Errorf("command failed"))
 	mock.setError("system_profiler", fmt.Errorf("command failed"))
 
-	_, err := macOSCPUInfo(mock)
+	_, err := macOSCPUInfo(context.Background(), mock)
 	if err == nil {
 		t.Error("Expected error when all CPU info commands fail")
 	}
@@ -182,7 +183,7 @@ func TestMacOSCPUInfoAppleSiliconViaSysctl(t *testing.T) {
 	// sysctl returns "Apple M1 Pro" as brand_string, empty features (Apple Silicon behavior)
 	mock.setOutput("sysctl", "Apple M1 Pro")
 
-	result, err := macOSCPUInfo(mock)
+	result, err := macOSCPUInfo(context.Background(), mock)
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
 	}
@@ -210,7 +211,7 @@ func TestMacOSCPUInfoFallbackToProfiler(t *testing.T) {
 		}]
 	}`)
 
-	result, err := macOSCPUInfo(mock)
+	result, err := macOSCPUInfo(context.Background(), mock)
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
 	}
@@ -226,7 +227,7 @@ func TestMacOSCPUInfoAllFail(t *testing.T) {
 	mock.setError("sysctl", fmt.Errorf("command not found"))
 	mock.setError("system_profiler", fmt.Errorf("command not found"))
 
-	_, err := macOSCPUInfo(mock)
+	_, err := macOSCPUInfo(context.Background(), mock)
 	if err == nil {
 		t.Error("Expected error when all CPU methods fail")
 	}
@@ -312,7 +313,7 @@ func TestMacOSDiskInfoError(t *testing.T) {
 	mock := newMockExecutor()
 	mock.setError("system_profiler", fmt.Errorf("command failed"))
 
-	_, err := macOSDiskInfo(mock)
+	_, err := macOSDiskInfo(context.Background(), mock)
 	if err == nil {
 		t.Error("Expected error when system_profiler fails")
 	}
@@ -333,7 +334,7 @@ func TestMacOSDiskInfoSuccess(t *testing.T) {
 		]
 	}`)
 
-	result, err := macOSDiskInfo(mock)
+	result, err := macOSDiskInfo(context.Background(), mock)
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
 	}

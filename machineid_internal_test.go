@@ -1,8 +1,9 @@
 package machineid
 
 import (
+	"context"
+	"errors"
 	"fmt"
-	"strings"
 	"testing"
 )
 
@@ -15,7 +16,7 @@ func TestProviderWithMockExecutor(t *testing.T) {
 		WithExecutor(mock).
 		WithCPU()
 
-	id, err := g.ID()
+	id, err := g.ID(context.Background())
 	if err != nil {
 		t.Fatalf("ID() with mock executor error = %v", err)
 	}
@@ -25,7 +26,7 @@ func TestProviderWithMockExecutor(t *testing.T) {
 	}
 
 	// Verify the ID is consistent with the same mock
-	id2, err := g.ID()
+	id2, err := g.ID(context.Background())
 	if err != nil {
 		t.Fatalf("Second ID() call error = %v", err)
 	}
@@ -42,18 +43,18 @@ func TestProviderErrorHandling(t *testing.T) {
 		setupMock   func(*mockExecutor)
 		configure   func(*Provider) *Provider
 		expectError bool
-		errorMsg    string
+		wantErr     error
 	}{
 		{
 			name: "command execution fails but no fallback available",
 			setupMock: func(m *mockExecutor) {
 				m.setError("sysctl", fmt.Errorf("command not found"))
 			},
-			configure: func(g *Provider) *Provider {
-				return g.WithCPU()
+			configure: func(p *Provider) *Provider {
+				return p.WithCPU()
 			},
-			expectError: true, // Should error if all attempts to collect identifiers fail
-			errorMsg:    "no hardware identifiers found",
+			expectError: true,
+			wantErr:     ErrNoIdentifiers,
 		},
 		{
 			name: "no identifiers collected",
@@ -63,11 +64,11 @@ func TestProviderErrorHandling(t *testing.T) {
 				m.setError("ioreg", fmt.Errorf("failed"))
 				m.setError("system_profiler", fmt.Errorf("failed"))
 			},
-			configure: func(g *Provider) *Provider {
-				return g.WithCPU().WithSystemUUID()
+			configure: func(p *Provider) *Provider {
+				return p.WithCPU().WithSystemUUID()
 			},
 			expectError: true,
-			errorMsg:    "no hardware identifiers found",
+			wantErr:     ErrNoIdentifiers,
 		},
 	}
 
@@ -78,19 +79,19 @@ func TestProviderErrorHandling(t *testing.T) {
 				tt.setupMock(mock)
 			}
 
-			g := New().WithExecutor(mock)
-			g = tt.configure(g)
+			p := New().WithExecutor(mock)
+			p = tt.configure(p)
 
-			_, err := g.ID()
+			_, err := p.ID(context.Background())
 			if tt.expectError && err == nil {
 				t.Error("Expected error but got none")
 			}
 			if !tt.expectError && err != nil {
 				t.Errorf("Unexpected error: %v", err)
 			}
-			if tt.expectError && err != nil && tt.errorMsg != "" {
-				if !strings.Contains(err.Error(), tt.errorMsg) {
-					t.Errorf("Error message %q does not contain %q", err.Error(), tt.errorMsg)
+			if tt.expectError && err != nil && tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Errorf("got error %v, want %v", err, tt.wantErr)
 				}
 			}
 		})
@@ -137,7 +138,7 @@ func TestValidateError(t *testing.T) {
 
 	p := New().WithExecutor(mock).WithCPU()
 
-	valid, err := p.Validate("some-id")
+	valid, err := p.Validate(context.Background(), "some-id")
 	if err == nil {
 		t.Error("Expected error when ID generation fails")
 	}
@@ -278,7 +279,7 @@ func TestDiagnosticsAvailableAfterID(t *testing.T) {
 		t.Error("Diagnostics should be nil before ID() call")
 	}
 
-	_, err := p.ID()
+	_, err := p.ID(context.Background())
 	if err != nil {
 		t.Fatalf("ID() error: %v", err)
 	}
@@ -309,7 +310,7 @@ func TestDiagnosticsRecordsFailures(t *testing.T) {
 
 	p := New().WithExecutor(mock).WithCPU().WithSystemUUID()
 
-	_, err := p.ID()
+	_, err := p.ID(context.Background())
 	if err != nil {
 		t.Fatalf("ID() error: %v", err)
 	}
@@ -332,7 +333,7 @@ func TestProviderCachedIDNotModified(t *testing.T) {
 
 	p := New().WithExecutor(mock).WithCPU()
 
-	id1, err := p.ID()
+	id1, err := p.ID(context.Background())
 	if err != nil {
 		t.Fatalf("First ID() call failed: %v", err)
 	}
@@ -341,7 +342,7 @@ func TestProviderCachedIDNotModified(t *testing.T) {
 	mock.setOutput("sysctl", "CPU2")
 
 	// Should still return cached value
-	id2, err := p.ID()
+	id2, err := p.ID(context.Background())
 	if err != nil {
 		t.Fatalf("Second ID() call failed: %v", err)
 	}
@@ -372,7 +373,7 @@ func TestProviderAllIdentifiers(t *testing.T) {
 		WithMAC().
 		WithDisk()
 
-	id, err := p.ID()
+	id, err := p.ID(context.Background())
 	if err != nil {
 		t.Fatalf("ID() with all identifiers failed: %v", err)
 	}
@@ -389,7 +390,7 @@ func TestCollectIdentifiersError(t *testing.T) {
 
 	p := New().WithExecutor(mock).WithCPU()
 
-	_, err := p.ID()
+	_, err := p.ID(context.Background())
 	if err == nil {
 		t.Error("Expected error when collectIdentifiers fails")
 	}
@@ -403,13 +404,13 @@ func TestProviderValidateMismatch(t *testing.T) {
 	p := New().WithExecutor(mock).WithCPU()
 
 	// Generate ID
-	id, err := p.ID()
+	id, err := p.ID(context.Background())
 	if err != nil {
 		t.Fatalf("ID() failed: %v", err)
 	}
 
 	// Validate with different ID
-	valid, err := p.Validate(id + "different")
+	valid, err := p.Validate(context.Background(), id+"different")
 	if err != nil {
 		t.Errorf("Validate() error: %v", err)
 	}

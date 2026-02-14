@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -143,7 +144,9 @@ func main() {
 	}
 
 	// Generate machine ID
-	id, err := provider.ID()
+	ctx := context.Background()
+
+	id, err := provider.ID(ctx)
 	if err != nil {
 		slog.Error("failed to generate machine ID", "error", err)
 		os.Exit(1)
@@ -151,7 +154,7 @@ func main() {
 
 	// Validate mode
 	if *validate != "" {
-		handleValidate(provider, *validate, *jsonOutput)
+		handleValidate(ctx, provider, *validate, *jsonOutput)
 		return
 	}
 
@@ -191,8 +194,8 @@ func parseFormatMode(format int) (machineid.FormatMode, error) {
 	}
 }
 
-func handleValidate(provider *machineid.Provider, expectedID string, jsonOut bool) {
-	valid, err := provider.Validate(expectedID)
+func handleValidate(ctx context.Context, provider *machineid.Provider, expectedID string, jsonOut bool) {
+	valid, err := provider.Validate(ctx, expectedID)
 	if err != nil {
 		slog.Error("validation failed", "error", err)
 		os.Exit(1)

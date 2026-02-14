@@ -20,7 +20,7 @@
 //	id, err := machineid.New().
 //		WithCPU().
 //		WithSystemUUID().
-//		ID()
+//		ID(ctx)
 //
 // # Configuring Hardware Sources
 //
@@ -55,14 +55,14 @@
 //		WithCPU().
 //		WithSystemUUID().
 //		WithSalt("my-app-v1").
-//		ID()
+//		ID(ctx)
 //
 // # Validation
 //
 // [Provider.Validate] regenerates the ID and compares it to a previously
 // stored value:
 //
-//	valid, err := provider.Validate(storedID)
+//	valid, err := provider.Validate(ctx, storedID)
 //
 // # Diagnostics
 //

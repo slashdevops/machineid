@@ -10,18 +10,15 @@ import (
 
 // defaultCommandExecutor implements CommandExecutor using actual system command execution.
 type defaultCommandExecutor struct {
-	TimeOut time.Duration
+	Timeout time.Duration
 }
 
 // Execute runs a system command with a timeout and returns the output.
 // It uses context.WithTimeout to prevent commands from hanging indefinitely.
 func (e *defaultCommandExecutor) Execute(ctx context.Context, name string, args ...string) (string, error) {
-	// Set a timeout of 5 seconds for command execution
-	var timeout time.Duration
-	if e.TimeOut > 0 {
-		timeout = e.TimeOut
-	} else {
-		timeout = 3 * time.Second
+	timeout := e.Timeout
+	if timeout <= 0 {
+		timeout = defaultTimeout
 	}
 
 	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
@@ -36,14 +33,14 @@ func (e *defaultCommandExecutor) Execute(ctx context.Context, name string, args 
 	return strings.TrimSpace(string(output)), nil
 }
 
-// executeCommand is a convenience wrapper that creates a context and calls Execute.
+// executeCommand is a convenience wrapper that calls Execute with the given context.
 // This function is used by platform-specific collectors that need the Provider's executor.
-func executeCommand(executor CommandExecutor, name string, args ...string) (string, error) {
+func executeCommand(ctx context.Context, executor CommandExecutor, name string, args ...string) (string, error) {
 	if executor == nil {
 		executor = &defaultCommandExecutor{
-			TimeOut: 3 * time.Second,
+			Timeout: defaultTimeout,
 		}
 	}
 
-	return executor.Execute(context.Background(), name, args...)
+	return executor.Execute(ctx, name, args...)
 }

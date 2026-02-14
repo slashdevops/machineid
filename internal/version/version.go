@@ -1,20 +1,11 @@
-// Package version provides information about the current version of the applications.
-// Any program in the cmd/ directory should import this package to access version information.
-// The version information is set at build time using the -ldflags option.
-// Example: go build -ldflags "-X 'github.com/yourusername/yourapp/internal/version.Version=1.0.0' -X 'github.com/yourusername/yourapp/internal/version.BuildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)'"
-// The variables are exported and can be accessed by importing this package.
-// The variables are set to default values, which can be overridden at build time.
-// The default values are:
-// Version: "0.0.0"
-// BuildDate: "1970-01-01T00:00:00Z"
-// GitCommit: ""
-// GitBranch: ""
-// BuildUser: ""
-// GoVersion: runtime.Version()
-// GoVersionArch: runtime.GOARCH
-// GoVersionOS: runtime.GOOS
-// The GoVersion, GoVersionArch, and GoVersionOS variables are set to the current
-// version of Go, architecture, and operating system used to build the application.
+// Package version provides build-time metadata for the CLI application.
+//
+// All variables have sensible defaults and can be overridden at build time
+// using -ldflags:
+//
+//	go build -ldflags "\
+//	  -X 'github.com/slashdevops/machineid/internal/version.Version=1.0.0' \
+//	  -X 'github.com/slashdevops/machineid/internal/version.BuildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)'"
 package version
 
 import "runtime"

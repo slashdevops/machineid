@@ -1,8 +1,9 @@
 package machineid_test
 
 import (
+	"context"
+	"errors"
 	"fmt"
-	"strings"
 	"testing"
 
 	"github.com/slashdevops/machineid"
@@ -20,7 +21,7 @@ func ExampleProvider() {
 		WithSalt("my-application-v1")
 
 	// Generate the machine ID
-	id, err := provider.ID()
+	id, err := provider.ID(context.Background())
 	if err != nil {
 		fmt.Printf("Error generating ID: %v\n", err)
 		return
@@ -31,7 +32,7 @@ func ExampleProvider() {
 	fmt.Printf("Machine ID is hexadecimal: %v\n", isHexString(id))
 
 	// Validate the ID
-	valid, err := provider.Validate(id)
+	valid, err := provider.Validate(context.Background(), id)
 	if err != nil {
 		fmt.Printf("Error validating ID: %v\n", err)
 		return
@@ -52,7 +53,7 @@ func ExampleProvider_VMFriendly() {
 		VMFriendly().
 		WithSalt("vm-app")
 
-	id, err := provider.ID()
+	id, err := provider.ID(context.Background())
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
 		return
@@ -63,20 +64,23 @@ func ExampleProvider_VMFriendly() {
 	// Generated VM-friendly ID: true
 }
 
-// Helper function for example
+// isHexString reports whether s is a non-empty string of lowercase hex digits.
 func isHexString(s string) bool {
+	if len(s) == 0 {
+		return false
+	}
 	for _, c := range s {
-		if (c < '0' || c > '9') && (c < 'a' || c > 'f') && c != '-' {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
 			return false
 		}
 	}
-	return len(s) > 0
+	return true
 }
 
 func TestProviderBasic(t *testing.T) {
 	g := machineid.New().WithCPU().WithSystemUUID().WithMotherboard().WithMAC().WithDisk()
 
-	id, err := g.ID()
+	id, err := g.ID(context.Background())
 	if err != nil {
 		t.Fatalf("ID() error = %v", err)
 	}
@@ -86,7 +90,7 @@ func TestProviderBasic(t *testing.T) {
 	}
 
 	// Test consistency
-	id2, err := g.ID()
+	id2, err := g.ID(context.Background())
 	if err != nil {
 		t.Fatalf("ID() second call error = %v", err)
 	}
@@ -100,7 +104,7 @@ func TestProviderWithSalt(t *testing.T) {
 	salt := "test-salt"
 	g := machineid.New().WithCPU().WithSystemUUID().WithSalt(salt)
 
-	id, err := g.ID()
+	id, err := g.ID(context.Background())
 	if err != nil {
 		t.Fatalf("ID() with salt error = %v", err)
 	}
@@ -111,7 +115,7 @@ func TestProviderWithSalt(t *testing.T) {
 
 	// Different salts should produce different IDs
 	g2 := machineid.New().WithCPU().WithSystemUUID().WithSalt("different-salt")
-	id2, err := g2.ID()
+	id2, err := g2.ID(context.Background())
 	if err != nil {
 		t.Fatalf("ID() with different salt error = %v", err)
 	}
@@ -124,12 +128,12 @@ func TestProviderWithSalt(t *testing.T) {
 func TestProviderValidate(t *testing.T) {
 	g := machineid.New().WithCPU().WithSystemUUID()
 
-	id, err := g.ID()
+	id, err := g.ID(context.Background())
 	if err != nil {
 		t.Fatalf("ID() error = %v", err)
 	}
 
-	valid, err := g.Validate(id)
+	valid, err := g.Validate(context.Background(), id)
 	if err != nil {
 		t.Fatalf("Validate() error = %v", err)
 	}
@@ -139,7 +143,7 @@ func TestProviderValidate(t *testing.T) {
 	}
 
 	// Test with invalid ID
-	valid, err = g.Validate("invalid-id")
+	valid, err = g.Validate(context.Background(), "invalid-id")
 	if err != nil {
 		t.Fatalf("Validate() error = %v", err)
 	}
@@ -152,7 +156,7 @@ func TestProviderValidate(t *testing.T) {
 func TestVMFriendly(t *testing.T) {
 	g := machineid.New().VMFriendly().WithSalt("vm-test")
 
-	id, err := g.ID()
+	id, err := g.ID(context.Background())
 	if err != nil {
 		t.Fatalf("VMFriendly().ID() error = %v", err)
 	}
@@ -163,7 +167,7 @@ func TestVMFriendly(t *testing.T) {
 
 	// Test that it's different from full hardware
 	g2 := machineid.New().WithCPU().WithSystemUUID().WithMotherboard().WithMAC().WithDisk().WithSalt("vm-test")
-	id2, err := g2.ID()
+	id2, err := g2.ID(context.Background())
 	if err != nil {
 		t.Fatalf("Full hardware ID() error = %v", err)
 	}
@@ -176,14 +180,13 @@ func TestVMFriendly(t *testing.T) {
 func TestNoIdentifiersError(t *testing.T) {
 	g := machineid.New() // No identifiers enabled
 
-	_, err := g.ID()
+	_, err := g.ID(context.Background())
 	if err == nil {
 		t.Error("ID() should return error when no identifiers are enabled")
 	}
 
-	expectedError := "no hardware identifiers found with current configuration"
-	if !strings.Contains(err.Error(), expectedError) {
-		t.Errorf("ID() error should contain %q, got %q", expectedError, err.Error())
+	if !errors.Is(err, machineid.ErrNoIdentifiers) {
+		t.Errorf("ID() error should be ErrNoIdentifiers, got %v", err)
 	}
 }
 
@@ -195,7 +198,7 @@ func TestProviderChaining(t *testing.T) {
 		WithSystemUUID().
 		WithMotherboard()
 
-	id, err := g.ID()
+	id, err := g.ID(context.Background())
 	if err != nil {
 		t.Fatalf("Chained provider ID() error = %v", err)
 	}
@@ -205,7 +208,7 @@ func TestProviderChaining(t *testing.T) {
 	}
 
 	// Verify it validates correctly
-	valid, err := g.Validate(id)
+	valid, err := g.Validate(context.Background(), id)
 	if err != nil {
 		t.Fatalf("Chained provider Validate() error = %v", err)
 	}
@@ -226,7 +229,7 @@ func TestProviderConcurrency(t *testing.T) {
 
 	for range numGoroutines {
 		go func() {
-			id, err := g.ID()
+			id, err := g.ID(context.Background())
 			if err != nil {
 				errors <- err
 				return
@@ -258,14 +261,14 @@ func TestProviderConcurrency(t *testing.T) {
 // TestValidateWithDifferentConfiguration tests validation behavior.
 func TestValidateWithDifferentConfiguration(t *testing.T) {
 	g1 := machineid.New().WithCPU().WithSystemUUID()
-	id1, err := g1.ID()
+	id1, err := g1.ID(context.Background())
 	if err != nil {
-		t.Fatalf("g1.ID() error = %v", err)
+		t.Fatalf("g1.ID(context.Background()) error = %v", err)
 	}
 
 	// Same configuration should validate
 	g2 := machineid.New().WithCPU().WithSystemUUID()
-	valid, err := g2.Validate(id1)
+	valid, err := g2.Validate(context.Background(), id1)
 	if err != nil {
 		t.Fatalf("g2.Validate() error = %v", err)
 	}
@@ -276,7 +279,7 @@ func TestValidateWithDifferentConfiguration(t *testing.T) {
 
 	// Different configuration should not validate
 	g3 := machineid.New().WithCPU() // Missing SystemUUID
-	valid, err = g3.Validate(id1)
+	valid, err = g3.Validate(context.Background(), id1)
 	if err != nil {
 		t.Fatalf("g3.Validate() error = %v", err)
 	}
@@ -293,7 +296,7 @@ func TestFormat32(t *testing.T) {
 		WithSystemUUID().
 		WithFormat(machineid.Format32)
 
-	id, err := g.ID()
+	id, err := g.ID(context.Background())
 	if err != nil {
 		t.Fatalf("Format32 ID() error = %v", err)
 	}
@@ -317,7 +320,7 @@ func TestFormat64(t *testing.T) {
 		WithSystemUUID().
 		WithFormat(machineid.Format64)
 
-	id, err := g.ID()
+	id, err := g.ID(context.Background())
 	if err != nil {
 		t.Fatalf("Format64 ID() error = %v", err)
 	}
@@ -341,7 +344,7 @@ func TestFormat128(t *testing.T) {
 		WithSystemUUID().
 		WithFormat(machineid.Format128)
 
-	id, err := g.ID()
+	id, err := g.ID(context.Background())
 	if err != nil {
 		t.Fatalf("Format128 ID() error = %v", err)
 	}
@@ -365,7 +368,7 @@ func TestFormat256(t *testing.T) {
 		WithSystemUUID().
 		WithFormat(machineid.Format256)
 
-	id, err := g.ID()
+	id, err := g.ID(context.Background())
 	if err != nil {
 		t.Fatalf("Format256 ID() error = %v", err)
 	}
@@ -389,9 +392,9 @@ func TestFormatDifference(t *testing.T) {
 	g64 := machineid.New().WithCPU().WithSystemUUID().WithFormat(machineid.Format64)
 	g128 := machineid.New().WithCPU().WithSystemUUID().WithFormat(machineid.Format128)
 
-	id32, _ := g32.ID()
-	id64, _ := g64.ID()
-	id128, _ := g128.ID()
+	id32, _ := g32.ID(context.Background())
+	id64, _ := g64.ID(context.Background())
+	id128, _ := g128.ID(context.Background())
 
 	// Format32 should be the first 32 chars of Format64
 	if id32 != id64[:32] {
@@ -409,7 +412,7 @@ func TestFormatDefault(t *testing.T) {
 	// Create provider without explicit format
 	g := machineid.New().WithCPU().WithSystemUUID()
 
-	id, err := g.ID()
+	id, err := g.ID(context.Background())
 	if err != nil {
 		t.Fatalf("Default ID() error = %v", err)
 	}
@@ -421,7 +424,7 @@ func TestFormatDefault(t *testing.T) {
 
 	// Should match explicit Format64
 	g64 := machineid.New().WithCPU().WithSystemUUID().WithFormat(machineid.Format64)
-	id64, err := g64.ID()
+	id64, err := g64.ID(context.Background())
 	if err != nil {
 		t.Fatalf("Format64 ID() error = %v", err)
 	}
@@ -444,32 +447,32 @@ func TestFormatConsistency(t *testing.T) {
 		{"Format256", machineid.Format256, 256},
 	}
 
-	for _, fmt := range formats {
-		t.Run(fmt.name, func(t *testing.T) {
+	for _, tc := range formats {
+		t.Run(tc.name, func(t *testing.T) {
 			g := machineid.New().
 				WithCPU().
 				WithSystemUUID().
-				WithFormat(fmt.format)
+				WithFormat(tc.format)
 
 			// Generate ID multiple times
-			id1, err := g.ID()
+			id1, err := g.ID(context.Background())
 			if err != nil {
-				t.Fatalf("%s first ID() error = %v", fmt.name, err)
+				t.Fatalf("%s first ID() error = %v", tc.name, err)
 			}
 
-			id2, err := g.ID()
+			id2, err := g.ID(context.Background())
 			if err != nil {
-				t.Fatalf("%s second ID() error = %v", fmt.name, err)
+				t.Fatalf("%s second ID() error = %v", tc.name, err)
 			}
 
 			// Should be identical (cached)
 			if id1 != id2 {
-				t.Errorf("%s should produce consistent results, got different IDs", fmt.name)
+				t.Errorf("%s should produce consistent results, got different IDs", tc.name)
 			}
 
 			// Should have correct length
-			if len(id1) != fmt.length {
-				t.Errorf("%s should have length %d, got %d", fmt.name, fmt.length, len(id1))
+			if len(id1) != tc.length {
+				t.Errorf("%s should have length %d, got %d", tc.name, tc.length, len(id1))
 			}
 		})
 	}
@@ -487,22 +490,22 @@ func TestFormatNoDashes(t *testing.T) {
 		{"Format256", machineid.Format256},
 	}
 
-	for _, fmt := range formats {
-		t.Run(fmt.name, func(t *testing.T) {
+	for _, tc := range formats {
+		t.Run(tc.name, func(t *testing.T) {
 			g := machineid.New().
 				WithCPU().
 				WithSystemUUID().
-				WithFormat(fmt.format)
+				WithFormat(tc.format)
 
-			id, err := g.ID()
+			id, err := g.ID(context.Background())
 			if err != nil {
-				t.Fatalf("%s ID() error = %v", fmt.name, err)
+				t.Fatalf("%s ID() error = %v", tc.name, err)
 			}
 
 			// Check for dashes
 			for i, c := range id {
 				if c == '-' {
-					t.Errorf("%s should not contain dashes, found dash at position %d", fmt.name, i)
+					t.Errorf("%s should not contain dashes, found dash at position %d", tc.name, i)
 				}
 			}
 		})
@@ -555,7 +558,7 @@ func TestFormatWithDifferentHardware(t *testing.T) {
 				p = config.setup(p)
 				p = p.WithFormat(format)
 
-				id, err := p.ID()
+				id, err := p.ID(context.Background())
 				if err != nil {
 					t.Fatalf("ID() error = %v", err)
 				}
@@ -592,42 +595,42 @@ func TestFormatWithSalt(t *testing.T) {
 		{"Format256", machineid.Format256, 256},
 	}
 
-	for _, fmt := range formats {
-		t.Run(fmt.name, func(t *testing.T) {
+	for _, tc := range formats {
+		t.Run(tc.name, func(t *testing.T) {
 			// With salt
 			g1 := machineid.New().
 				WithCPU().
 				WithSystemUUID().
 				WithSalt(salt).
-				WithFormat(fmt.format)
+				WithFormat(tc.format)
 
-			id1, err := g1.ID()
+			id1, err := g1.ID(context.Background())
 			if err != nil {
-				t.Fatalf("%s with salt ID() error = %v", fmt.name, err)
+				t.Fatalf("%s with salt ID() error = %v", tc.name, err)
 			}
 
 			// Without salt
 			g2 := machineid.New().
 				WithCPU().
 				WithSystemUUID().
-				WithFormat(fmt.format)
+				WithFormat(tc.format)
 
-			id2, err := g2.ID()
+			id2, err := g2.ID(context.Background())
 			if err != nil {
-				t.Fatalf("%s without salt ID() error = %v", fmt.name, err)
+				t.Fatalf("%s without salt ID() error = %v", tc.name, err)
 			}
 
 			// IDs should be different
 			if id1 == id2 {
-				t.Errorf("%s: IDs with and without salt should differ", fmt.name)
+				t.Errorf("%s: IDs with and without salt should differ", tc.name)
 			}
 
 			// Both should have correct length
-			if len(id1) != fmt.length {
-				t.Errorf("%s with salt: expected length %d, got %d", fmt.name, fmt.length, len(id1))
+			if len(id1) != tc.length {
+				t.Errorf("%s with salt: expected length %d, got %d", tc.name, tc.length, len(id1))
 			}
-			if len(id2) != fmt.length {
-				t.Errorf("%s without salt: expected length %d, got %d", fmt.name, fmt.length, len(id2))
+			if len(id2) != tc.length {
+				t.Errorf("%s without salt: expected length %d, got %d", tc.name, tc.length, len(id2))
 			}
 		})
 	}
@@ -645,30 +648,30 @@ func TestFormatValidation(t *testing.T) {
 		{"Format256", machineid.Format256},
 	}
 
-	for _, fmt := range formats {
-		t.Run(fmt.name, func(t *testing.T) {
+	for _, tc := range formats {
+		t.Run(tc.name, func(t *testing.T) {
 			g := machineid.New().
 				WithCPU().
 				WithSystemUUID().
-				WithFormat(fmt.format)
+				WithFormat(tc.format)
 
-			id, err := g.ID()
+			id, err := g.ID(context.Background())
 			if err != nil {
-				t.Fatalf("%s ID() error = %v", fmt.name, err)
+				t.Fatalf("%s ID() error = %v", tc.name, err)
 			}
 
 			// Validation should succeed with same format
-			valid, err := g.Validate(id)
+			valid, err := g.Validate(context.Background(), id)
 			if err != nil {
-				t.Fatalf("%s Validate() error = %v", fmt.name, err)
+				t.Fatalf("%s Validate() error = %v", tc.name, err)
 			}
 			if !valid {
-				t.Errorf("%s Validate() should return true for matching ID", fmt.name)
+				t.Errorf("%s Validate() should return true for matching ID", tc.name)
 			}
 
 			// Validation should fail with different format
 			var differentFormat machineid.FormatMode
-			if fmt.format == machineid.Format32 {
+			if tc.format == machineid.Format32 {
 				differentFormat = machineid.Format64
 			} else {
 				differentFormat = machineid.Format32
@@ -679,12 +682,12 @@ func TestFormatValidation(t *testing.T) {
 				WithSystemUUID().
 				WithFormat(differentFormat)
 
-			valid2, err := g2.Validate(id)
+			valid2, err := g2.Validate(context.Background(), id)
 			if err != nil {
-				t.Fatalf("%s Validate() with different format error = %v", fmt.name, err)
+				t.Fatalf("%s Validate() with different format error = %v", tc.name, err)
 			}
 			if valid2 {
-				t.Errorf("%s Validate() should return false for different format", fmt.name)
+				t.Errorf("%s Validate() should return false for different format", tc.name)
 			}
 		})
 	}
@@ -704,30 +707,30 @@ func TestFormatPowerOfTwo(t *testing.T) {
 		{"Format256", machineid.Format256, 256, 8},
 	}
 
-	for _, fmt := range formats {
-		t.Run(fmt.name, func(t *testing.T) {
+	for _, tc := range formats {
+		t.Run(tc.name, func(t *testing.T) {
 			g := machineid.New().
 				WithCPU().
 				WithSystemUUID().
-				WithFormat(fmt.format)
+				WithFormat(tc.format)
 
-			id, err := g.ID()
+			id, err := g.ID(context.Background())
 			if err != nil {
-				t.Fatalf("%s ID() error = %v", fmt.name, err)
+				t.Fatalf("%s ID() error = %v", tc.name, err)
 			}
 
 			// Verify length
-			if len(id) != fmt.length {
-				t.Errorf("%s: expected length %d, got %d", fmt.name, fmt.length, len(id))
+			if len(id) != tc.length {
+				t.Errorf("%s: expected length %d, got %d", tc.name, tc.length, len(id))
 			}
 
 			// Verify it's a power of 2
 			power := 1
-			for i := 0; i < fmt.power; i++ {
+			for i := 0; i < tc.power; i++ {
 				power *= 2
 			}
 			if len(id) != power {
-				t.Errorf("%s: length should be 2^%d = %d, got %d", fmt.name, fmt.power, power, len(id))
+				t.Errorf("%s: length should be 2^%d = %d, got %d", tc.name, tc.power, power, len(id))
 			}
 		})
 	}

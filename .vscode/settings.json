@@ -3,7 +3,9 @@
     "betteralign",
     "golangci",
     "govulncheck",
+    "ioreg",
     "machineid",
+    "OSCPU",
     "slashdevops",
     "UEFI",
     "vulncheck"

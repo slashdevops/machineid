@@ -4,11 +4,27 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+)
+
+// Sentinel errors returned by [Provider.ID].
+var (
+	// ErrNoIdentifiers is returned when no hardware identifiers could be
+	// collected with the current configuration.
+	ErrNoIdentifiers = errors.New("no hardware identifiers found with current configuration")
+
+	// ErrEmptyValue is returned in [DiagnosticInfo.Errors] when a hardware
+	// component returned an empty value.
+	ErrEmptyValue = errors.New("empty value returned")
+
+	// ErrNoValues is returned in [DiagnosticInfo.Errors] when a hardware
+	// component returned no values.
+	ErrNoValues = errors.New("no values found")
 )
 
 // FormatMode defines the output format and length of the machine ID.
@@ -34,6 +50,9 @@ const (
 	ComponentDisk        = "disk"
 	ComponentMachineID   = "machine-id" // Linux systemd machine-id
 )
+
+// defaultTimeout is the default timeout for system command execution.
+const defaultTimeout = 5 * time.Second
 
 // DiagnosticInfo contains information about what was collected during ID generation.
 // Use [Provider.Diagnostics] to retrieve this information after calling [Provider.ID].
@@ -70,127 +89,130 @@ type Provider struct {
 func New() *Provider {
 	return &Provider{
 		commandExecutor: &defaultCommandExecutor{
-			TimeOut: 5 * time.Second,
+			Timeout: defaultTimeout,
 		},
 		formatMode: Format64,
 	}
 }
 
 // WithSalt sets a custom salt for additional entropy.
-func (g *Provider) WithSalt(salt string) *Provider {
-	g.salt = salt
+func (p *Provider) WithSalt(salt string) *Provider {
+	p.salt = salt
 
-	return g
+	return p
 }
 
 // WithFormat sets the output format and length.
 // Use Format64 (default), Format32, Format128, or Format256.
-func (g *Provider) WithFormat(mode FormatMode) *Provider {
-	g.formatMode = mode
+func (p *Provider) WithFormat(mode FormatMode) *Provider {
+	p.formatMode = mode
 
-	return g
+	return p
 }
 
 // WithCPU includes the CPU identifier in the generation.
-func (g *Provider) WithCPU() *Provider {
-	g.includeCPU = true
+func (p *Provider) WithCPU() *Provider {
+	p.includeCPU = true
 
-	return g
+	return p
 }
 
 // WithMotherboard includes the motherboard serial number in the generation.
-func (g *Provider) WithMotherboard() *Provider {
-	g.includeMotherboard = true
+func (p *Provider) WithMotherboard() *Provider {
+	p.includeMotherboard = true
 
-	return g
+	return p
 }
 
 // WithSystemUUID includes the system UUID in the generation.
-func (g *Provider) WithSystemUUID() *Provider {
-	g.includeSystemUUID = true
+func (p *Provider) WithSystemUUID() *Provider {
+	p.includeSystemUUID = true
 
-	return g
+	return p
 }
 
 // WithMAC includes network interface MAC addresses in the generation.
-func (g *Provider) WithMAC() *Provider {
-	g.includeMAC = true
+func (p *Provider) WithMAC() *Provider {
+	p.includeMAC = true
 
-	return g
+	return p
 }
 
 // WithDisk includes disk serial numbers in the generation.
-func (g *Provider) WithDisk() *Provider {
-	g.includeDisk = true
+func (p *Provider) WithDisk() *Provider {
+	p.includeDisk = true
 
-	return g
+	return p
 }
 
-// WithExecutor sets a custom command executor for testing purposes.
-// This method is primarily intended for testing and should not be used in production.
-func (g *Provider) WithExecutor(executor CommandExecutor) *Provider {
-	g.commandExecutor = executor
+// WithExecutor sets a custom [CommandExecutor], enabling deterministic testing
+// without real system commands.
+func (p *Provider) WithExecutor(executor CommandExecutor) *Provider {
+	p.commandExecutor = executor
 
-	return g
+	return p
 }
 
 // VMFriendly configures the provider for virtual machines (CPU + UUID only).
-func (g *Provider) VMFriendly() *Provider {
-	g.includeCPU = true
-	g.includeSystemUUID = true
-	g.includeMotherboard = false
-	g.includeMAC = false
-	g.includeDisk = false
+func (p *Provider) VMFriendly() *Provider {
+	p.includeCPU = true
+	p.includeSystemUUID = true
+	p.includeMotherboard = false
+	p.includeMAC = false
+	p.includeDisk = false
 
-	return g
+	return p
 }
 
 // ID generates the machine ID based on the configured options.
 // It caches the result, so subsequent calls return the same ID.
 // The configuration is frozen after the first successful call to ID().
+// The provided context controls the timeout and cancellation of any
+// system commands executed during hardware identifier collection.
 // This method is safe for concurrent use.
-func (g *Provider) ID() (string, error) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
+func (p *Provider) ID(ctx context.Context) (string, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 
-	if g.cachedID != "" {
-		return g.cachedID, nil
+	if p.cachedID != "" {
+		return p.cachedID, nil
 	}
 
 	diag := &DiagnosticInfo{
 		Errors: make(map[string]error),
 	}
 
-	identifiers, err := collectIdentifiers(g, diag)
+	identifiers, err := collectIdentifiers(ctx, p, diag)
 	if err != nil {
 		return "", fmt.Errorf("failed to collect hardware identifiers: %w", err)
 	}
 
 	if len(identifiers) == 0 {
-		g.diagnostics = diag
+		p.diagnostics = diag
 
-		return "", fmt.Errorf("no hardware identifiers found with current configuration")
+		return "", ErrNoIdentifiers
 	}
 
-	g.diagnostics = diag
-	g.cachedID = hashIdentifiers(identifiers, g.salt, g.formatMode)
+	p.diagnostics = diag
+	p.cachedID = hashIdentifiers(identifiers, p.salt, p.formatMode)
 
-	return g.cachedID, nil
+	return p.cachedID, nil
 }
 
 // Diagnostics returns information about which hardware components were
 // successfully collected and which ones failed during the last call to [ID].
 // Returns nil if [ID] has not been called yet.
-func (g *Provider) Diagnostics() *DiagnosticInfo {
-	g.mu.Lock()
-	defer g.mu.Unlock()
+func (p *Provider) Diagnostics() *DiagnosticInfo {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 
-	return g.diagnostics
+	return p.diagnostics
 }
 
 // Validate checks if the provided ID matches the current machine ID.
-func (g *Provider) Validate(id string) (bool, error) {
-	currentID, err := g.ID()
+// The provided context is forwarded to [ID] if it needs to generate the ID.
+func (p *Provider) Validate(ctx context.Context, id string) (bool, error) {
+	currentID, err := p.ID(ctx)
 	if err != nil {
 		return false, err
 	}
@@ -215,7 +237,7 @@ func hashIdentifiers(identifiers []string, salt string, mode FormatMode) string 
 }
 
 // formatHash formats a 64-character SHA-256 hash according to the specified mode.
-// All formats (except legacy) produce power-of-2 lengths without dashes.
+// All formats produce power-of-2 lengths without dashes.
 func formatHash(hash string, mode FormatMode) string {
 	if len(hash) != 64 {
 		return hash
@@ -265,7 +287,7 @@ func appendIdentifierIfValid(identifiers []string, getValue func() (string, erro
 
 	if value == "" {
 		if diag != nil {
-			diag.Errors[component] = fmt.Errorf("empty value returned")
+			diag.Errors[component] = ErrEmptyValue
 		}
 
 		return identifiers
@@ -292,7 +314,7 @@ func appendIdentifiersIfValid(identifiers []string, getValues func() ([]string, 
 
 	if len(values) == 0 {
 		if diag != nil {
-			diag.Errors[component] = fmt.Errorf("no values found")
+			diag.Errors[component] = ErrNoValues
 		}
 
 		return identifiers

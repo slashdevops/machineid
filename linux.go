@@ -3,6 +3,8 @@
 package machineid
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,29 +12,29 @@ import (
 )
 
 // collectIdentifiers gathers Linux-specific hardware identifiers based on provider config.
-func collectIdentifiers(g *Provider, diag *DiagnosticInfo) ([]string, error) {
+func collectIdentifiers(ctx context.Context, p *Provider, diag *DiagnosticInfo) ([]string, error) {
 	var identifiers []string
 
-	if g.includeCPU {
+	if p.includeCPU {
 		identifiers = appendIdentifierIfValid(identifiers, linuxCPUID, "cpu:", diag, ComponentCPU)
 	}
 
-	if g.includeSystemUUID {
+	if p.includeSystemUUID {
 		identifiers = appendIdentifierIfValid(identifiers, linuxSystemUUID, "uuid:", diag, ComponentSystemUUID)
 		identifiers = appendIdentifierIfValid(identifiers, linuxMachineID, "machine:", diag, ComponentMachineID)
 	}
 
-	if g.includeMotherboard {
+	if p.includeMotherboard {
 		identifiers = appendIdentifierIfValid(identifiers, linuxMotherboardSerial, "mb:", diag, ComponentMotherboard)
 	}
 
-	if g.includeMAC {
+	if p.includeMAC {
 		identifiers = appendIdentifiersIfValid(identifiers, collectMACAddresses, "mac:", diag, ComponentMAC)
 	}
 
-	if g.includeDisk {
+	if p.includeDisk {
 		identifiers = appendIdentifiersIfValid(identifiers, func() ([]string, error) {
-			return linuxDiskSerials(g.commandExecutor)
+			return linuxDiskSerials(ctx, p.commandExecutor)
 		}, "disk:", diag, ComponentDisk)
 	}
 
@@ -120,25 +122,17 @@ func readFirstValidFromLocations(locations []string, validator func(string) bool
 		}
 	}
 
-	return "", fmt.Errorf("valid value not found in any location")
+	return "", errors.New("valid value not found in any location")
 }
 
 // isValidUUID checks if UUID is valid (not empty or null)
 func isValidUUID(uuid string) bool {
-	if uuid == "" || uuid == "00000000-0000-0000-0000-000000000000" {
-		return false
-	}
-
-	return true
+	return uuid != "" && uuid != "00000000-0000-0000-0000-000000000000"
 }
 
 // isValidSerial checks if serial is valid (not empty or placeholder)
 func isValidSerial(serial string) bool {
-	if serial == "" || serial == biosFirmwareMessage {
-		return false
-	}
-
-	return true
+	return serial != "" && serial != biosFirmwareMessage
 }
 
 // isNonEmpty checks if value is not empty
@@ -149,12 +143,12 @@ func isNonEmpty(value string) bool {
 // linuxDiskSerials retrieves disk serial numbers using various methods.
 // Results are deduplicated across sources to prevent the same serial
 // from appearing multiple times.
-func linuxDiskSerials(executor CommandExecutor) ([]string, error) {
+func linuxDiskSerials(ctx context.Context, executor CommandExecutor) ([]string, error) {
 	seen := make(map[string]struct{})
 	var serials []string
 
 	// Try using lsblk command first
-	if lsblkSerials, err := linuxDiskSerialsLSBLK(executor); err == nil {
+	if lsblkSerials, err := linuxDiskSerialsLSBLK(ctx, executor); err == nil {
 		for _, s := range lsblkSerials {
 			if _, exists := seen[s]; !exists {
 				seen[s] = struct{}{}
@@ -177,8 +171,8 @@ func linuxDiskSerials(executor CommandExecutor) ([]string, error) {
 }
 
 // linuxDiskSerialsLSBLK retrieves disk serials using lsblk command.
-func linuxDiskSerialsLSBLK(executor CommandExecutor) ([]string, error) {
-	output, err := executeCommand(executor, "lsblk", "-d", "-n", "-o", "SERIAL")
+func linuxDiskSerialsLSBLK(ctx context.Context, executor CommandExecutor) ([]string, error) {
+	output, err := executeCommand(ctx, executor, "lsblk", "-d", "-n", "-o", "SERIAL")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get disk serials: %w", err)
 	}

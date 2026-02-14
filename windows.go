@@ -3,39 +3,41 @@
 package machineid
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"strings"
 )
 
 // collectIdentifiers gathers Windows-specific hardware identifiers based on provider config.
-func collectIdentifiers(g *Provider, diag *DiagnosticInfo) ([]string, error) {
+func collectIdentifiers(ctx context.Context, p *Provider, diag *DiagnosticInfo) ([]string, error) {
 	var identifiers []string
 
-	if g.includeCPU {
+	if p.includeCPU {
 		identifiers = appendIdentifierIfValid(identifiers, func() (string, error) {
-			return windowsCPUID(g.commandExecutor)
+			return windowsCPUID(ctx, p.commandExecutor)
 		}, "cpu:", diag, ComponentCPU)
 	}
 
-	if g.includeMotherboard {
+	if p.includeMotherboard {
 		identifiers = appendIdentifierIfValid(identifiers, func() (string, error) {
-			return windowsMotherboardSerial(g.commandExecutor)
+			return windowsMotherboardSerial(ctx, p.commandExecutor)
 		}, "mb:", diag, ComponentMotherboard)
 	}
 
-	if g.includeSystemUUID {
+	if p.includeSystemUUID {
 		identifiers = appendIdentifierIfValid(identifiers, func() (string, error) {
-			return windowsSystemUUID(g.commandExecutor)
+			return windowsSystemUUID(ctx, p.commandExecutor)
 		}, "uuid:", diag, ComponentSystemUUID)
 	}
 
-	if g.includeMAC {
+	if p.includeMAC {
 		identifiers = appendIdentifiersIfValid(identifiers, collectMACAddresses, "mac:", diag, ComponentMAC)
 	}
 
-	if g.includeDisk {
+	if p.includeDisk {
 		identifiers = appendIdentifiersIfValid(identifiers, func() ([]string, error) {
-			return windowsDiskSerials(g.commandExecutor)
+			return windowsDiskSerials(ctx, p.commandExecutor)
 		}, "disk:", diag, ComponentDisk)
 	}
 
@@ -84,7 +86,7 @@ func parseWmicMultipleValues(output, prefix string) []string {
 func parsePowerShellValue(output string) (string, error) {
 	value := strings.TrimSpace(output)
 	if value == "" {
-		return "", fmt.Errorf("empty value from PowerShell")
+		return "", errors.New("empty value from PowerShell")
 	}
 
 	return value, nil
@@ -106,8 +108,8 @@ func parsePowerShellMultipleValues(output string) []string {
 }
 
 // windowsCPUID retrieves CPU processor ID using wmic, with PowerShell fallback.
-func windowsCPUID(executor CommandExecutor) (string, error) {
-	output, err := executeCommand(executor, "wmic", "cpu", "get", "ProcessorId", "/value")
+func windowsCPUID(ctx context.Context, executor CommandExecutor) (string, error) {
+	output, err := executeCommand(ctx, executor, "wmic", "cpu", "get", "ProcessorId", "/value")
 	if err == nil {
 		if value, parseErr := parseWmicValue(output, "ProcessorId="); parseErr == nil {
 			return value, nil
@@ -115,7 +117,7 @@ func windowsCPUID(executor CommandExecutor) (string, error) {
 	}
 
 	// Fallback to PowerShell Get-CimInstance
-	psOutput, psErr := executeCommand(executor, "powershell", "-Command",
+	psOutput, psErr := executeCommand(ctx, executor, "powershell", "-Command",
 		"Get-CimInstance -ClassName Win32_Processor | Select-Object -ExpandProperty ProcessorId")
 	if psErr != nil {
 		return "", fmt.Errorf("failed to get CPU ID: wmic: %w, powershell: %w", err, psErr)
@@ -125,8 +127,8 @@ func windowsCPUID(executor CommandExecutor) (string, error) {
 }
 
 // windowsMotherboardSerial retrieves motherboard serial number using wmic, with PowerShell fallback.
-func windowsMotherboardSerial(executor CommandExecutor) (string, error) {
-	output, err := executeCommand(executor, "wmic", "baseboard", "get", "SerialNumber", "/value")
+func windowsMotherboardSerial(ctx context.Context, executor CommandExecutor) (string, error) {
+	output, err := executeCommand(ctx, executor, "wmic", "baseboard", "get", "SerialNumber", "/value")
 	if err == nil {
 		if value, parseErr := parseWmicValue(output, "SerialNumber="); parseErr == nil {
 			return value, nil
@@ -134,7 +136,7 @@ func windowsMotherboardSerial(executor CommandExecutor) (string, error) {
 	}
 
 	// Fallback to PowerShell Get-CimInstance
-	psOutput, psErr := executeCommand(executor, "powershell", "-Command",
+	psOutput, psErr := executeCommand(ctx, executor, "powershell", "-Command",
 		"Get-CimInstance -ClassName Win32_BaseBoard | Select-Object -ExpandProperty SerialNumber")
 	if psErr != nil {
 		return "", fmt.Errorf("failed to get motherboard serial: wmic: %w, powershell: %w", err, psErr)
@@ -146,16 +148,16 @@ func windowsMotherboardSerial(executor CommandExecutor) (string, error) {
 	}
 
 	if value == biosFirmwareMessage {
-		return "", fmt.Errorf("motherboard serial is OEM placeholder")
+		return "", errors.New("motherboard serial is OEM placeholder")
 	}
 
 	return value, nil
 }
 
 // windowsSystemUUID retrieves system UUID using wmic or PowerShell.
-func windowsSystemUUID(executor CommandExecutor) (string, error) {
+func windowsSystemUUID(ctx context.Context, executor CommandExecutor) (string, error) {
 	// Try wmic first
-	output, err := executeCommand(executor, "wmic", "csproduct", "get", "UUID", "/value")
+	output, err := executeCommand(ctx, executor, "wmic", "csproduct", "get", "UUID", "/value")
 	if err == nil {
 		if value, parseErr := parseWmicValue(output, "UUID="); parseErr == nil {
 			return value, nil
@@ -163,12 +165,12 @@ func windowsSystemUUID(executor CommandExecutor) (string, error) {
 	}
 
 	// Fallback to PowerShell
-	return windowsSystemUUIDViaPowerShell(executor)
+	return windowsSystemUUIDViaPowerShell(ctx, executor)
 }
 
 // windowsSystemUUIDViaPowerShell retrieves system UUID using PowerShell.
-func windowsSystemUUIDViaPowerShell(executor CommandExecutor) (string, error) {
-	output, err := executeCommand(executor, "powershell", "-Command",
+func windowsSystemUUIDViaPowerShell(ctx context.Context, executor CommandExecutor) (string, error) {
+	output, err := executeCommand(ctx, executor, "powershell", "-Command",
 		"Get-CimInstance -ClassName Win32_ComputerSystemProduct | Select-Object -ExpandProperty UUID")
 	if err != nil {
 		return "", fmt.Errorf("failed to get UUID via PowerShell: %w", err)
@@ -178,8 +180,8 @@ func windowsSystemUUIDViaPowerShell(executor CommandExecutor) (string, error) {
 }
 
 // windowsDiskSerials retrieves disk serial numbers using wmic, with PowerShell fallback.
-func windowsDiskSerials(executor CommandExecutor) ([]string, error) {
-	output, err := executeCommand(executor, "wmic", "diskdrive", "get", "SerialNumber", "/value")
+func windowsDiskSerials(ctx context.Context, executor CommandExecutor) ([]string, error) {
+	output, err := executeCommand(ctx, executor, "wmic", "diskdrive", "get", "SerialNumber", "/value")
 	if err == nil {
 		if values := parseWmicMultipleValues(output, "SerialNumber="); len(values) > 0 {
 			return values, nil
@@ -187,7 +189,7 @@ func windowsDiskSerials(executor CommandExecutor) ([]string, error) {
 	}
 
 	// Fallback to PowerShell Get-CimInstance
-	psOutput, psErr := executeCommand(executor, "powershell", "-Command",
+	psOutput, psErr := executeCommand(ctx, executor, "powershell", "-Command",
 		"Get-CimInstance -ClassName Win32_DiskDrive | Select-Object -ExpandProperty SerialNumber")
 	if psErr != nil {
 		return nil, fmt.Errorf("failed to get disk serials: wmic: %w, powershell: %w", err, psErr)
@@ -195,7 +197,7 @@ func windowsDiskSerials(executor CommandExecutor) ([]string, error) {
 
 	values := parsePowerShellMultipleValues(psOutput)
 	if len(values) == 0 {
-		return nil, fmt.Errorf("no disk serials found via PowerShell")
+		return nil, errors.New("no disk serials found via PowerShell")
 	}
 
 	return values, nil
