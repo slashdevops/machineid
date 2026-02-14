@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -71,6 +73,7 @@ type CommandExecutor interface {
 // Provider methods are safe for concurrent use after configuration is complete.
 type Provider struct {
 	commandExecutor    CommandExecutor
+	logger             *slog.Logger
 	diagnostics        *DiagnosticInfo
 	salt               string
 	cachedID           string
@@ -153,6 +156,19 @@ func (p *Provider) WithExecutor(executor CommandExecutor) *Provider {
 	return p
 }
 
+// WithLogger sets an optional [*slog.Logger] for observability.
+// When set, the provider logs component collection, fallback paths, command
+// execution timing, and errors. A nil logger (the default) disables all logging
+// with zero overhead.
+//
+// Compatible with any [*slog.Logger], including [slog.Default] which bridges
+// to the standard [log] package.
+func (p *Provider) WithLogger(logger *slog.Logger) *Provider {
+	p.logger = logger
+
+	return p
+}
+
 // VMFriendly configures the provider for virtual machines (CPU + UUID only).
 func (p *Provider) VMFriendly() *Provider {
 	p.includeCPU = true
@@ -175,8 +191,16 @@ func (p *Provider) ID(ctx context.Context) (string, error) {
 	defer p.mu.Unlock()
 
 	if p.cachedID != "" {
+		p.logDebug("returning cached machine ID")
+
 		return p.cachedID, nil
 	}
+
+	p.logInfo("generating machine ID",
+		"platform", runtime.GOOS,
+		"format", p.formatMode,
+		"components", p.enabledComponents(),
+	)
 
 	diag := &DiagnosticInfo{
 		Errors: make(map[string]error),
@@ -189,12 +213,20 @@ func (p *Provider) ID(ctx context.Context) (string, error) {
 
 	if len(identifiers) == 0 {
 		p.diagnostics = diag
+		p.logWarn("no hardware identifiers collected", "errors", diag.Errors)
 
 		return "", ErrNoIdentifiers
 	}
 
+	p.logDebug("collected identifiers", "count", len(identifiers), "identifiers", identifiers)
+
 	p.diagnostics = diag
 	p.cachedID = hashIdentifiers(identifiers, p.salt, p.formatMode)
+
+	p.logInfo("machine ID generated",
+		"collected", diag.Collected,
+		"errors_count", len(diag.Errors),
+	)
 
 	return p.cachedID, nil
 }
@@ -273,13 +305,59 @@ func formatHash(hash string, mode FormatMode) string {
 	}
 }
 
+// logDebug logs at debug level if a logger is configured.
+func (p *Provider) logDebug(msg string, args ...any) {
+	if p.logger != nil {
+		p.logger.Debug(msg, args...)
+	}
+}
+
+// logInfo logs at info level if a logger is configured.
+func (p *Provider) logInfo(msg string, args ...any) {
+	if p.logger != nil {
+		p.logger.Info(msg, args...)
+	}
+}
+
+// logWarn logs at warn level if a logger is configured.
+func (p *Provider) logWarn(msg string, args ...any) {
+	if p.logger != nil {
+		p.logger.Warn(msg, args...)
+	}
+}
+
+// enabledComponents returns the names of the hardware components that are enabled.
+func (p *Provider) enabledComponents() []string {
+	var components []string
+	if p.includeCPU {
+		components = append(components, ComponentCPU)
+	}
+	if p.includeMotherboard {
+		components = append(components, ComponentMotherboard)
+	}
+	if p.includeSystemUUID {
+		components = append(components, ComponentSystemUUID)
+	}
+	if p.includeMAC {
+		components = append(components, ComponentMAC)
+	}
+	if p.includeDisk {
+		components = append(components, ComponentDisk)
+	}
+
+	return components
+}
+
 // appendIdentifierIfValid adds the result of getValue to identifiers with the given prefix if valid.
 // It records the result in diag under the given component name.
-func appendIdentifierIfValid(identifiers []string, getValue func() (string, error), prefix string, diag *DiagnosticInfo, component string) []string {
+func appendIdentifierIfValid(identifiers []string, getValue func() (string, error), prefix string, diag *DiagnosticInfo, component string, logger *slog.Logger) []string {
 	value, err := getValue()
 	if err != nil {
 		if diag != nil {
 			diag.Errors[component] = err
+		}
+		if logger != nil {
+			logger.Warn("component failed", "component", component, "error", err)
 		}
 
 		return identifiers
@@ -289,6 +367,9 @@ func appendIdentifierIfValid(identifiers []string, getValue func() (string, erro
 		if diag != nil {
 			diag.Errors[component] = ErrEmptyValue
 		}
+		if logger != nil {
+			logger.Warn("component returned empty value", "component", component)
+		}
 
 		return identifiers
 	}
@@ -296,17 +377,24 @@ func appendIdentifierIfValid(identifiers []string, getValue func() (string, erro
 	if diag != nil {
 		diag.Collected = append(diag.Collected, component)
 	}
+	if logger != nil {
+		logger.Info("component collected", "component", component)
+		logger.Debug("component value", "component", component, "value", value)
+	}
 
 	return append(identifiers, prefix+value)
 }
 
 // appendIdentifiersIfValid adds the results of getValues to identifiers with the given prefix if valid.
 // It records the result in diag under the given component name.
-func appendIdentifiersIfValid(identifiers []string, getValues func() ([]string, error), prefix string, diag *DiagnosticInfo, component string) []string {
+func appendIdentifiersIfValid(identifiers []string, getValues func() ([]string, error), prefix string, diag *DiagnosticInfo, component string, logger *slog.Logger) []string {
 	values, err := getValues()
 	if err != nil {
 		if diag != nil {
 			diag.Errors[component] = err
+		}
+		if logger != nil {
+			logger.Warn("component failed", "component", component, "error", err)
 		}
 
 		return identifiers
@@ -316,12 +404,19 @@ func appendIdentifiersIfValid(identifiers []string, getValues func() ([]string, 
 		if diag != nil {
 			diag.Errors[component] = ErrNoValues
 		}
+		if logger != nil {
+			logger.Warn("component returned no values", "component", component)
+		}
 
 		return identifiers
 	}
 
 	if diag != nil {
 		diag.Collected = append(diag.Collected, component)
+	}
+	if logger != nil {
+		logger.Info("component collected", "component", component, "count", len(values))
+		logger.Debug("component values", "component", component, "values", values)
 	}
 
 	for _, value := range values {

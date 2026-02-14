@@ -3,6 +3,7 @@ package machineid
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os/exec"
 	"strings"
 	"time"
@@ -35,12 +36,28 @@ func (e *defaultCommandExecutor) Execute(ctx context.Context, name string, args 
 
 // executeCommand is a convenience wrapper that calls Execute with the given context.
 // This function is used by platform-specific collectors that need the Provider's executor.
-func executeCommand(ctx context.Context, executor CommandExecutor, name string, args ...string) (string, error) {
+func executeCommand(ctx context.Context, executor CommandExecutor, logger *slog.Logger, name string, args ...string) (string, error) {
 	if executor == nil {
 		executor = &defaultCommandExecutor{
 			Timeout: defaultTimeout,
 		}
 	}
 
-	return executor.Execute(ctx, name, args...)
+	if logger != nil {
+		logger.Debug("executing command", "command", name, "args", args)
+	}
+
+	start := time.Now()
+	result, err := executor.Execute(ctx, name, args...)
+	duration := time.Since(start)
+
+	if logger != nil {
+		if err != nil {
+			logger.Debug("command failed", "command", name, "duration", duration, "error", err)
+		} else {
+			logger.Debug("command completed", "command", name, "duration", duration)
+		}
+	}
+
+	return result, err
 }

@@ -68,7 +68,7 @@ func TestExecuteTimeout(t *testing.T) {
 // TestExecuteCommandWithNilExecutor tests executeCommand with nil executor.
 func TestExecuteCommandWithNilExecutor(t *testing.T) {
 	// This should use the default realExecutor
-	_, err := executeCommand(context.Background(), nil, "echo", "test")
+	_, err := executeCommand(context.Background(), nil, nil, "echo", "test")
 	// We expect this to work or fail gracefully
 	if err != nil {
 		// That's fine, we just want to ensure no panic

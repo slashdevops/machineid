@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,28 +15,37 @@ import (
 // collectIdentifiers gathers Linux-specific hardware identifiers based on provider config.
 func collectIdentifiers(ctx context.Context, p *Provider, diag *DiagnosticInfo) ([]string, error) {
 	var identifiers []string
+	logger := p.logger
 
 	if p.includeCPU {
-		identifiers = appendIdentifierIfValid(identifiers, linuxCPUID, "cpu:", diag, ComponentCPU)
+		identifiers = appendIdentifierIfValid(identifiers, linuxCPUID, "cpu:", diag, ComponentCPU, logger)
 	}
 
 	if p.includeSystemUUID {
-		identifiers = appendIdentifierIfValid(identifiers, linuxSystemUUID, "uuid:", diag, ComponentSystemUUID)
-		identifiers = appendIdentifierIfValid(identifiers, linuxMachineID, "machine:", diag, ComponentMachineID)
+		identifiers = appendIdentifierIfValid(identifiers, func() (string, error) {
+			return linuxSystemUUID(logger)
+		}, "uuid:", diag, ComponentSystemUUID, logger)
+		identifiers = appendIdentifierIfValid(identifiers, func() (string, error) {
+			return linuxMachineID(logger)
+		}, "machine:", diag, ComponentMachineID, logger)
 	}
 
 	if p.includeMotherboard {
-		identifiers = appendIdentifierIfValid(identifiers, linuxMotherboardSerial, "mb:", diag, ComponentMotherboard)
+		identifiers = appendIdentifierIfValid(identifiers, func() (string, error) {
+			return linuxMotherboardSerial(logger)
+		}, "mb:", diag, ComponentMotherboard, logger)
 	}
 
 	if p.includeMAC {
-		identifiers = appendIdentifiersIfValid(identifiers, collectMACAddresses, "mac:", diag, ComponentMAC)
+		identifiers = appendIdentifiersIfValid(identifiers, func() ([]string, error) {
+			return collectMACAddresses(logger)
+		}, "mac:", diag, ComponentMAC, logger)
 	}
 
 	if p.includeDisk {
 		identifiers = appendIdentifiersIfValid(identifiers, func() ([]string, error) {
-			return linuxDiskSerials(ctx, p.commandExecutor)
-		}, "disk:", diag, ComponentDisk)
+			return linuxDiskSerials(ctx, p.commandExecutor, logger)
+		}, "disk:", diag, ComponentDisk, logger)
 	}
 
 	return identifiers, nil
@@ -80,45 +90,55 @@ func parseCPUInfo(content string) string {
 }
 
 // linuxSystemUUID retrieves system UUID from DMI
-func linuxSystemUUID() (string, error) {
+func linuxSystemUUID(logger *slog.Logger) (string, error) {
 	// Try multiple locations for system UUID
 	locations := []string{
 		"/sys/class/dmi/id/product_uuid",
 		"/sys/devices/virtual/dmi/id/product_uuid",
 	}
 
-	return readFirstValidFromLocations(locations, isValidUUID)
+	return readFirstValidFromLocations(locations, isValidUUID, logger)
 }
 
 // linuxMotherboardSerial retrieves motherboard serial number from DMI
-func linuxMotherboardSerial() (string, error) {
+func linuxMotherboardSerial(logger *slog.Logger) (string, error) {
 	locations := []string{
 		"/sys/class/dmi/id/board_serial",
 		"/sys/devices/virtual/dmi/id/board_serial",
 	}
 
-	return readFirstValidFromLocations(locations, isValidSerial)
+	return readFirstValidFromLocations(locations, isValidSerial, logger)
 }
 
 // linuxMachineID retrieves systemd machine ID
-func linuxMachineID() (string, error) {
+func linuxMachineID(logger *slog.Logger) (string, error) {
 	locations := []string{
 		"/etc/machine-id",
 		"/var/lib/dbus/machine-id",
 	}
 
-	return readFirstValidFromLocations(locations, isNonEmpty)
+	return readFirstValidFromLocations(locations, isNonEmpty, logger)
 }
 
 // readFirstValidFromLocations reads from multiple locations until valid value found
-func readFirstValidFromLocations(locations []string, validator func(string) bool) (string, error) {
+func readFirstValidFromLocations(locations []string, validator func(string) bool, logger *slog.Logger) (string, error) {
 	for _, location := range locations {
 		data, err := os.ReadFile(location)
 		if err == nil {
 			value := strings.TrimSpace(string(data))
 			if validator(value) {
+				if logger != nil {
+					logger.Debug("read value from file", "path", location)
+				}
+
 				return value, nil
 			}
+
+			if logger != nil {
+				logger.Debug("file value failed validation", "path", location)
+			}
+		} else if logger != nil {
+			logger.Debug("failed to read file", "path", location, "error", err)
 		}
 	}
 
@@ -143,12 +163,12 @@ func isNonEmpty(value string) bool {
 // linuxDiskSerials retrieves disk serial numbers using various methods.
 // Results are deduplicated across sources to prevent the same serial
 // from appearing multiple times.
-func linuxDiskSerials(ctx context.Context, executor CommandExecutor) ([]string, error) {
+func linuxDiskSerials(ctx context.Context, executor CommandExecutor, logger *slog.Logger) ([]string, error) {
 	seen := make(map[string]struct{})
 	var serials []string
 
 	// Try using lsblk command first
-	if lsblkSerials, err := linuxDiskSerialsLSBLK(ctx, executor); err == nil {
+	if lsblkSerials, err := linuxDiskSerialsLSBLK(ctx, executor, logger); err == nil {
 		for _, s := range lsblkSerials {
 			if _, exists := seen[s]; !exists {
 				seen[s] = struct{}{}
@@ -171,8 +191,8 @@ func linuxDiskSerials(ctx context.Context, executor CommandExecutor) ([]string, 
 }
 
 // linuxDiskSerialsLSBLK retrieves disk serials using lsblk command.
-func linuxDiskSerialsLSBLK(ctx context.Context, executor CommandExecutor) ([]string, error) {
-	output, err := executeCommand(ctx, executor, "lsblk", "-d", "-n", "-o", "SERIAL")
+func linuxDiskSerialsLSBLK(ctx context.Context, executor CommandExecutor, logger *slog.Logger) ([]string, error) {
+	output, err := executeCommand(ctx, executor, logger, "lsblk", "-d", "-n", "-o", "SERIAL")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get disk serials: %w", err)
 	}

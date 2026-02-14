@@ -1,6 +1,7 @@
 package machineid
 
 import (
+	"log/slog"
 	"net"
 	"strings"
 )
@@ -27,7 +28,7 @@ var virtualInterfacePrefixes = []string{
 
 // collectMACAddresses retrieves MAC addresses from physical network interfaces.
 // Virtual, VPN, bridge, and container interfaces are excluded for stability.
-func collectMACAddresses() ([]string, error) {
+func collectMACAddresses(logger *slog.Logger) ([]string, error) {
 	interfaces, err := net.Interfaces()
 	if err != nil {
 		return nil, err
@@ -43,12 +44,24 @@ func collectMACAddresses() ([]string, error) {
 
 		// Skip interfaces that are not up — they may be transient.
 		if i.Flags&net.FlagUp == 0 {
+			if logger != nil {
+				logger.Debug("skipping interface (not up)", "interface", i.Name)
+			}
+
 			continue
 		}
 
 		// Skip virtual/VPN/bridge interfaces that are not stable hardware.
 		if isVirtualInterface(i.Name) {
+			if logger != nil {
+				logger.Debug("skipping virtual interface", "interface", i.Name)
+			}
+
 			continue
+		}
+
+		if logger != nil {
+			logger.Debug("including interface", "interface", i.Name, "mac", i.HardwareAddr.String())
 		}
 
 		macs = append(macs, i.HardwareAddr.String())

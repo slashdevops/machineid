@@ -20,6 +20,7 @@ A **zero-dependency** Go library that generates unique, deterministic machine id
 - **VM Friendly** — preset for virtual environments (CPU + UUID)
 - **Thread-Safe** — safe for concurrent use after configuration
 - **Diagnostic API** — inspect which components succeeded or failed
+- **Optional Logging** — `*slog.Logger` support for observability with zero overhead when disabled
 - **Testable** — dependency-injectable command executor
 
 ## Installation
@@ -109,6 +110,7 @@ make build
 package main
 
 import (
+    "context"
     "fmt"
     "log"
 
@@ -116,10 +118,11 @@ import (
 )
 
 func main() {
+    ctx := context.Background()
     id, err := machineid.New().
         WithCPU().
         WithSystemUUID().
-        ID()
+        ID(ctx)
     if err != nil {
         log.Fatal(err)
     }
@@ -135,6 +138,7 @@ func main() {
 Enable one or more hardware sources via the `With*` methods:
 
 ```go
+ctx := context.Background()
 provider := machineid.New().
     WithCPU().            // processor ID and feature flags
     WithMotherboard().    // motherboard serial number
@@ -142,7 +146,7 @@ provider := machineid.New().
     WithMAC().            // physical network interface MAC addresses
     WithDisk()            // internal disk serial numbers
 
-id, err := provider.ID()
+id, err := provider.ID(ctx)
 ```
 
 ### Output Formats
@@ -150,17 +154,19 @@ id, err := provider.ID()
 All formats produce pure hexadecimal strings without dashes:
 
 ```go
+ctx := context.Background()
+
 // 32 characters (2^5) — compact
-id, _ := machineid.New().WithCPU().WithSystemUUID().WithFormat(machineid.Format32).ID()
+id, _ := machineid.New().WithCPU().WithSystemUUID().WithFormat(machineid.Format32).ID(ctx)
 
 // 64 characters (2^6) — default, full SHA-256
-id, _ = machineid.New().WithCPU().WithSystemUUID().WithFormat(machineid.Format64).ID()
+id, _ = machineid.New().WithCPU().WithSystemUUID().WithFormat(machineid.Format64).ID(ctx)
 
 // 128 characters (2^7) — extended
-id, _ = machineid.New().WithCPU().WithSystemUUID().WithFormat(machineid.Format128).ID()
+id, _ = machineid.New().WithCPU().WithSystemUUID().WithFormat(machineid.Format128).ID(ctx)
 
 // 256 characters (2^8) — maximum
-id, _ = machineid.New().WithCPU().WithSystemUUID().WithFormat(machineid.Format256).ID()
+id, _ = machineid.New().WithCPU().WithSystemUUID().WithFormat(machineid.Format256).ID(ctx)
 ```
 
 | Format | Length | Bits | Collision Probability (1 B IDs) | Use Case |
@@ -175,11 +181,12 @@ id, _ = machineid.New().WithCPU().WithSystemUUID().WithFormat(machineid.Format25
 A salt ensures the same machine produces different IDs for different applications:
 
 ```go
+ctx := context.Background()
 id, _ := machineid.New().
     WithCPU().
     WithSystemUUID().
     WithSalt("my-app-v1").
-    ID()
+    ID(ctx)
 ```
 
 ### VM-Friendly Mode
@@ -187,10 +194,11 @@ id, _ := machineid.New().
 For virtual machines where disk serials and MACs may be unstable:
 
 ```go
+ctx := context.Background()
 id, _ := machineid.New().
     VMFriendly().  // CPU + System UUID only
     WithSalt("my-app").
-    ID()
+    ID(ctx)
 ```
 
 ### Validation
@@ -198,8 +206,9 @@ id, _ := machineid.New().
 Check whether a stored ID still matches the current hardware:
 
 ```go
+ctx := context.Background()
 provider := machineid.New().WithCPU().WithSystemUUID()
-valid, err := provider.Validate(storedID)
+valid, err := provider.Validate(ctx, storedID)
 ```
 
 ### Diagnostics
@@ -207,16 +216,52 @@ valid, err := provider.Validate(storedID)
 Inspect which hardware components were successfully collected:
 
 ```go
+ctx := context.Background()
 provider := machineid.New().
     WithCPU().
     WithSystemUUID().
     WithDisk()
 
-id, _ := provider.ID()
+id, _ := provider.ID(ctx)
 
 diag := provider.Diagnostics()
 fmt.Println("Collected:", diag.Collected)  // e.g. [cpu uuid]
 fmt.Println("Errors:", diag.Errors)        // e.g. map[disk: no internal disk identifiers found]
+```
+
+### Logging
+
+Enable optional logging with any `*slog.Logger` for observability. When no logger is set (the default), there is zero overhead:
+
+```go
+import (
+    "log/slog"
+    "os"
+)
+
+ctx := context.Background()
+logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+    Level: slog.LevelDebug,
+}))
+
+id, err := machineid.New().
+    WithCPU().
+    WithSystemUUID().
+    WithLogger(logger).
+    ID(ctx)
+```
+
+| Log Level | What's Logged                                                         |
+|-----------|-----------------------------------------------------------------------|
+| **Info**  | Component collected, fallback triggered, ID generation lifecycle      |
+| **Warn**  | Component failed or returned empty value                              |
+| **Debug** | Command execution details (name, args, duration), raw hardware values |
+
+The logger is compatible with `slog.Default()` which bridges to the standard `log` package:
+
+```go
+// Use the standard library default logger
+provider.WithLogger(slog.Default())
 ```
 
 ## CLI Tool

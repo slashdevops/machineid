@@ -73,6 +73,25 @@
 //	fmt.Println("Collected:", diag.Collected)
 //	fmt.Println("Errors:", diag.Errors)
 //
+// # Logging
+//
+// [Provider.WithLogger] accepts a [*log/slog.Logger] for optional observability.
+// When set, the provider logs component collection results, fallback paths,
+// command execution timing, and errors. A nil logger (the default) disables
+// all logging with zero overhead.
+//
+//	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+//	id, err := machineid.New().
+//		WithCPU().
+//		WithSystemUUID().
+//		WithLogger(logger).
+//		ID(ctx)
+//
+// Log levels:
+//   - Info: component collected, fallback triggered, ID generation lifecycle
+//   - Warn: component failed or returned empty value
+//   - Debug: command execution details, raw hardware values, timing
+//
 // # Thread Safety
 //
 // A [Provider] is safe for concurrent use after configuration is complete.

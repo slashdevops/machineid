@@ -6,7 +6,7 @@ import (
 
 // TestCollectMACAddresses tests network interface MAC address collection.
 func TestCollectMACAddresses(t *testing.T) {
-	macs, err := collectMACAddresses()
+	macs, err := collectMACAddresses(nil)
 	if err != nil {
 		t.Logf("collectMACAddresses error (might be expected in some environments): %v", err)
 	}

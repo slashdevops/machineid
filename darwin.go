@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"strings"
 )
@@ -54,41 +55,44 @@ type spPhysicalDrive struct {
 // collectIdentifiers gathers macOS-specific hardware identifiers based on provider config.
 func collectIdentifiers(ctx context.Context, p *Provider, diag *DiagnosticInfo) ([]string, error) {
 	var identifiers []string
+	logger := p.logger
 
 	if p.includeSystemUUID {
 		identifiers = appendIdentifierIfValid(identifiers, func() (string, error) {
-			return macOSHardwareUUID(ctx, p.commandExecutor)
-		}, "uuid:", diag, ComponentSystemUUID)
+			return macOSHardwareUUID(ctx, p.commandExecutor, logger)
+		}, "uuid:", diag, ComponentSystemUUID, logger)
 	}
 
 	if p.includeMotherboard {
 		identifiers = appendIdentifierIfValid(identifiers, func() (string, error) {
-			return macOSSerialNumber(ctx, p.commandExecutor)
-		}, "serial:", diag, ComponentMotherboard)
+			return macOSSerialNumber(ctx, p.commandExecutor, logger)
+		}, "serial:", diag, ComponentMotherboard, logger)
 	}
 
 	if p.includeCPU {
 		identifiers = appendIdentifierIfValid(identifiers, func() (string, error) {
-			return macOSCPUInfo(ctx, p.commandExecutor)
-		}, "cpu:", diag, ComponentCPU)
+			return macOSCPUInfo(ctx, p.commandExecutor, logger)
+		}, "cpu:", diag, ComponentCPU, logger)
 	}
 
 	if p.includeMAC {
-		identifiers = appendIdentifiersIfValid(identifiers, collectMACAddresses, "mac:", diag, ComponentMAC)
+		identifiers = appendIdentifiersIfValid(identifiers, func() ([]string, error) {
+			return collectMACAddresses(logger)
+		}, "mac:", diag, ComponentMAC, logger)
 	}
 
 	if p.includeDisk {
 		identifiers = appendIdentifiersIfValid(identifiers, func() ([]string, error) {
-			return macOSDiskInfo(ctx, p.commandExecutor)
-		}, "disk:", diag, ComponentDisk)
+			return macOSDiskInfo(ctx, p.commandExecutor, logger)
+		}, "disk:", diag, ComponentDisk, logger)
 	}
 
 	return identifiers, nil
 }
 
 // macOSHardwareUUID retrieves hardware UUID using system_profiler with JSON parsing.
-func macOSHardwareUUID(ctx context.Context, executor CommandExecutor) (string, error) {
-	output, err := executeCommand(ctx, executor, "system_profiler", "SPHardwareDataType", "-json")
+func macOSHardwareUUID(ctx context.Context, executor CommandExecutor, logger *slog.Logger) (string, error) {
+	output, err := executeCommand(ctx, executor, logger, "system_profiler", "SPHardwareDataType", "-json")
 	if err == nil {
 		uuid, parseErr := extractHardwareField(output, func(e spHardwareEntry) string {
 			return e.PlatformUUID
@@ -99,12 +103,16 @@ func macOSHardwareUUID(ctx context.Context, executor CommandExecutor) (string, e
 	}
 
 	// Fallback to ioreg
-	return macOSHardwareUUIDViaIOReg(ctx, executor)
+	if logger != nil {
+		logger.Info("falling back to ioreg for hardware UUID")
+	}
+
+	return macOSHardwareUUIDViaIOReg(ctx, executor, logger)
 }
 
 // macOSHardwareUUIDViaIOReg retrieves hardware UUID using ioreg as fallback.
-func macOSHardwareUUIDViaIOReg(ctx context.Context, executor CommandExecutor) (string, error) {
-	output, err := executeCommand(ctx, executor, "ioreg", "-d2", "-c", "IOPlatformExpertDevice")
+func macOSHardwareUUIDViaIOReg(ctx context.Context, executor CommandExecutor, logger *slog.Logger) (string, error) {
+	output, err := executeCommand(ctx, executor, logger, "ioreg", "-d2", "-c", "IOPlatformExpertDevice")
 	if err != nil {
 		return "", fmt.Errorf("failed to get hardware UUID: %w", err)
 	}
@@ -118,8 +126,8 @@ func macOSHardwareUUIDViaIOReg(ctx context.Context, executor CommandExecutor) (s
 }
 
 // macOSSerialNumber retrieves system serial number.
-func macOSSerialNumber(ctx context.Context, executor CommandExecutor) (string, error) {
-	output, err := executeCommand(ctx, executor, "system_profiler", "SPHardwareDataType", "-json")
+func macOSSerialNumber(ctx context.Context, executor CommandExecutor, logger *slog.Logger) (string, error) {
+	output, err := executeCommand(ctx, executor, logger, "system_profiler", "SPHardwareDataType", "-json")
 	if err == nil {
 		serial, parseErr := extractHardwareField(output, func(e spHardwareEntry) string {
 			return e.SerialNumber
@@ -130,12 +138,16 @@ func macOSSerialNumber(ctx context.Context, executor CommandExecutor) (string, e
 	}
 
 	// Fallback to ioreg
-	return macOSSerialNumberViaIOReg(ctx, executor)
+	if logger != nil {
+		logger.Info("falling back to ioreg for serial number")
+	}
+
+	return macOSSerialNumberViaIOReg(ctx, executor, logger)
 }
 
 // macOSSerialNumberViaIOReg retrieves serial number using ioreg as fallback.
-func macOSSerialNumberViaIOReg(ctx context.Context, executor CommandExecutor) (string, error) {
-	output, err := executeCommand(ctx, executor, "ioreg", "-d2", "-c", "IOPlatformExpertDevice")
+func macOSSerialNumberViaIOReg(ctx context.Context, executor CommandExecutor, logger *slog.Logger) (string, error) {
+	output, err := executeCommand(ctx, executor, logger, "ioreg", "-d2", "-c", "IOPlatformExpertDevice")
 	if err != nil {
 		return "", fmt.Errorf("failed to get serial number: %w", err)
 	}
@@ -155,14 +167,14 @@ func macOSSerialNumberViaIOReg(ctx context.Context, executor CommandExecutor) (s
 // producing "ChipType:" — this trailing colon is preserved for backward
 // compatibility with existing license activations.
 // Falls back to system_profiler chip_type only if sysctl fails entirely.
-func macOSCPUInfo(ctx context.Context, executor CommandExecutor) (string, error) {
+func macOSCPUInfo(ctx context.Context, executor CommandExecutor, logger *slog.Logger) (string, error) {
 	// Primary: sysctl (backward compatible)
-	output, err := executeCommand(ctx, executor, "sysctl", "-n", "machdep.cpu.brand_string")
+	output, err := executeCommand(ctx, executor, logger, "sysctl", "-n", "machdep.cpu.brand_string")
 	if err == nil {
 		cpuBrand := strings.TrimSpace(output)
 		if cpuBrand != "" {
 			// Get CPU features (populated on Intel, empty on Apple Silicon)
-			featOutput, featErr := executeCommand(ctx, executor, "sysctl", "-n", "machdep.cpu.features")
+			featOutput, featErr := executeCommand(ctx, executor, logger, "sysctl", "-n", "machdep.cpu.features")
 			if featErr == nil {
 				features := strings.TrimSpace(featOutput)
 
@@ -174,7 +186,11 @@ func macOSCPUInfo(ctx context.Context, executor CommandExecutor) (string, error)
 	}
 
 	// Fallback: system_profiler for Apple Silicon chip type
-	profilerOutput, profilerErr := executeCommand(ctx, executor, "system_profiler", "SPHardwareDataType", "-json")
+	if logger != nil {
+		logger.Info("falling back to system_profiler for CPU info")
+	}
+
+	profilerOutput, profilerErr := executeCommand(ctx, executor, logger, "system_profiler", "SPHardwareDataType", "-json")
 	if profilerErr == nil {
 		var hw spHardwareDataType
 		if jsonErr := json.Unmarshal([]byte(profilerOutput), &hw); jsonErr == nil && len(hw.SPHardwareDataType) > 0 {
@@ -191,8 +207,8 @@ func macOSCPUInfo(ctx context.Context, executor CommandExecutor) (string, error)
 // macOSDiskInfo retrieves internal disk device names for stable machine identification.
 // It uses system_profiler with JSON output and filters to internal disks only,
 // deduplicating across volumes on the same physical disk.
-func macOSDiskInfo(ctx context.Context, executor CommandExecutor) ([]string, error) {
-	output, err := executeCommand(ctx, executor, "system_profiler", "SPStorageDataType", "-json")
+func macOSDiskInfo(ctx context.Context, executor CommandExecutor, logger *slog.Logger) ([]string, error) {
+	output, err := executeCommand(ctx, executor, logger, "system_profiler", "SPStorageDataType", "-json")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get disk info: %w", err)
 	}

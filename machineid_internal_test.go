@@ -1,9 +1,11 @@
 package machineid
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"testing"
 )
 
@@ -154,7 +156,7 @@ func TestAppendIdentifierIfValidEmpty(t *testing.T) {
 		return "", nil
 	}
 
-	result := appendIdentifierIfValid([]string{"existing"}, getValue, "prefix:", diag, "test")
+	result := appendIdentifierIfValid([]string{"existing"}, getValue, "prefix:", diag, "test", nil)
 	if len(result) != 1 {
 		t.Errorf("Expected 1 identifier, got %d", len(result))
 	}
@@ -170,7 +172,7 @@ func TestAppendIdentifierIfValidError(t *testing.T) {
 		return "", fmt.Errorf("test error")
 	}
 
-	result := appendIdentifierIfValid([]string{"existing"}, getValue, "prefix:", diag, "test")
+	result := appendIdentifierIfValid([]string{"existing"}, getValue, "prefix:", diag, "test", nil)
 	if len(result) != 1 {
 		t.Errorf("Expected 1 identifier (original), got %d", len(result))
 	}
@@ -186,7 +188,7 @@ func TestAppendIdentifierIfValidSuccess(t *testing.T) {
 		return "good-value", nil
 	}
 
-	result := appendIdentifierIfValid([]string{"existing"}, getValue, "prefix:", diag, "test")
+	result := appendIdentifierIfValid([]string{"existing"}, getValue, "prefix:", diag, "test", nil)
 	if len(result) != 2 {
 		t.Errorf("Expected 2 identifiers, got %d", len(result))
 	}
@@ -202,7 +204,7 @@ func TestAppendIdentifiersIfValidEmpty(t *testing.T) {
 		return []string{}, nil
 	}
 
-	result := appendIdentifiersIfValid([]string{"existing"}, getValues, "prefix:", diag, "test")
+	result := appendIdentifiersIfValid([]string{"existing"}, getValues, "prefix:", diag, "test", nil)
 	if len(result) != 1 {
 		t.Errorf("Expected 1 identifier, got %d", len(result))
 	}
@@ -215,7 +217,7 @@ func TestAppendIdentifiersIfValidError(t *testing.T) {
 		return nil, fmt.Errorf("test error")
 	}
 
-	result := appendIdentifiersIfValid([]string{"existing"}, getValues, "prefix:", diag, "test")
+	result := appendIdentifiersIfValid([]string{"existing"}, getValues, "prefix:", diag, "test", nil)
 	if len(result) != 1 {
 		t.Errorf("Expected 1 identifier (original), got %d", len(result))
 	}
@@ -231,7 +233,7 @@ func TestAppendIdentifiersIfValidMultiple(t *testing.T) {
 		return []string{"val1", "val2", "val3"}, nil
 	}
 
-	result := appendIdentifiersIfValid([]string{"existing"}, getValues, "prefix:", diag, "test")
+	result := appendIdentifiersIfValid([]string{"existing"}, getValues, "prefix:", diag, "test", nil)
 	if len(result) != 4 {
 		t.Errorf("Expected 4 identifiers, got %d", len(result))
 	}
@@ -253,7 +255,7 @@ func TestAppendIdentifierNilDiag(t *testing.T) {
 		return "value", nil
 	}
 
-	result := appendIdentifierIfValid(nil, getValue, "prefix:", nil, "test")
+	result := appendIdentifierIfValid(nil, getValue, "prefix:", nil, "test", nil)
 	if len(result) != 1 {
 		t.Errorf("Expected 1 identifier, got %d", len(result))
 	}
@@ -417,5 +419,56 @@ func TestProviderValidateMismatch(t *testing.T) {
 
 	if valid {
 		t.Error("Expected validation to fail for different ID")
+	}
+}
+
+// TestWithLoggerOutput verifies that log output appears when a logger is set.
+func TestWithLoggerOutput(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	mock := newMockExecutor()
+	mock.setOutput("sysctl", "Test CPU Brand")
+
+	p := New().
+		WithExecutor(mock).
+		WithLogger(logger).
+		WithCPU()
+
+	_, err := p.ID(context.Background())
+	if err != nil {
+		t.Fatalf("ID() error: %v", err)
+	}
+
+	output := buf.String()
+	if output == "" {
+		t.Error("Expected log output when logger is set, got empty string")
+	}
+
+	// Check for key log messages
+	if !bytes.Contains(buf.Bytes(), []byte("generating machine ID")) {
+		t.Error("Expected 'generating machine ID' in log output")
+	}
+	if !bytes.Contains(buf.Bytes(), []byte("machine ID generated")) {
+		t.Error("Expected 'machine ID generated' in log output")
+	}
+	if !bytes.Contains(buf.Bytes(), []byte("component collected")) {
+		t.Error("Expected 'component collected' in log output")
+	}
+}
+
+// TestWithoutLoggerNoOutput verifies that no logging occurs without a logger.
+func TestWithoutLoggerNoOutput(t *testing.T) {
+	mock := newMockExecutor()
+	mock.setOutput("sysctl", "Test CPU Brand")
+
+	p := New().
+		WithExecutor(mock).
+		WithCPU()
+
+	// Should not panic or produce any output
+	_, err := p.ID(context.Background())
+	if err != nil {
+		t.Fatalf("ID() error: %v", err)
 	}
 }
