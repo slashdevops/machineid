@@ -142,11 +142,35 @@ provider := machineid.New().
     WithCPU().            // processor ID and feature flags
     WithMotherboard().    // motherboard serial number
     WithSystemUUID().     // BIOS/UEFI system UUID
-    WithMAC().            // physical network interface MAC addresses
+    WithMAC().            // physical network interface MAC addresses (default filter)
+
     WithDisk()            // internal disk serial numbers
 
 id, err := provider.ID(ctx)
 ```
+
+### MAC Address Filtering
+
+Control which network interfaces are included in the machine ID using `MACFilter`:
+
+```go
+ctx := context.Background()
+
+// Physical interfaces only (default, most stable for bare-metal)
+id, _ := machineid.New().WithCPU().WithMAC().ID(ctx)
+
+// All interfaces including virtual (VPN, Docker, bridges)
+id, _ = machineid.New().WithCPU().WithMAC(machineid.MACFilterAll).ID(ctx)
+
+// Only virtual interfaces (useful for container-specific fingerprinting)
+id, _ = machineid.New().WithCPU().WithMAC(machineid.MACFilterVirtual).ID(ctx)
+```
+
+| Filter              | Interfaces Included                                    | Best For                 |
+|---------------------|--------------------------------------------------------|--------------------------|
+| `MACFilterPhysical` | `en0`, `eth0`, `wlan0` (default)                       | Bare-metal stability     |
+| `MACFilterAll`      | Physical + virtual (`docker0`, `utun`, `bridge`, etc.) | Maximum uniqueness       |
+| `MACFilterVirtual`  | `docker0`, `utun`, `bridge0`, `veth`, `vmnet`, etc.    | Container fingerprinting |
 
 ### Output Formats
 
@@ -338,6 +362,12 @@ machineid -cpu -uuid -validate "b5c42832542981af58c9dc3bc241219e780ff7d276cfad05
 # Info-level logging (fallbacks, lifecycle events)
 machineid -cpu -uuid -verbose
 
+# Include only physical MACs (default)
+machineid -mac -mac-filter physical
+
+# Include all MACs (physical + virtual)
+machineid -all -mac-filter all
+
 # Debug-level logging (command details, raw values, timing)
 machineid -all -debug
 
@@ -354,6 +384,7 @@ machineid -version.long
 | `-motherboard`  | Include motherboard serial number                               |
 | `-uuid`         | Include system UUID                                             |
 | `-mac`          | Include network MAC addresses                                   |
+| `-mac-filter F` | MAC filter: `physical` (default), `all`, or `virtual`           |
 | `-disk`         | Include disk serial numbers                                     |
 | `-all`          | Include all hardware identifiers                                |
 | `-vm`           | VM-friendly mode (CPU + UUID only)                              |

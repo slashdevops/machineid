@@ -16,17 +16,43 @@ import (
 type FormatMode int
 
 const (
-	// Format64 outputs 64 hex characters (2^6), default SHA-256 output without dashes
+	// Format64 outputs 64 hex characters (2^6), default SHA-256 output without dashes.
 	Format64 FormatMode = iota
-	// Format32 outputs 32 hex characters (2^5), truncated SHA-256
+	// Format32 outputs 32 hex characters (2^5), truncated SHA-256.
 	Format32
-	// Format128 outputs 128 hex characters (2^7), double SHA-256
+	// Format128 outputs 128 hex characters (2^7), double SHA-256.
 	Format128
-	// Format256 outputs 256 hex characters (2^8), quadruple SHA-256
+	// Format256 outputs 256 hex characters (2^8), quadruple SHA-256.
 	Format256
 )
 
-// Component names used as keys in DiagnosticInfo.
+// MACFilter controls which network interfaces are included in MAC address collection.
+type MACFilter int
+
+const (
+	// MACFilterPhysical includes only physical network interfaces (default).
+	// Virtual, VPN, bridge, and container interfaces are excluded.
+	MACFilterPhysical MACFilter = iota
+	// MACFilterAll includes all non-loopback, up network interfaces (physical and virtual).
+	MACFilterAll
+	// MACFilterVirtual includes only virtual network interfaces
+	// (VPN, bridge, container, and hypervisor interfaces).
+	MACFilterVirtual
+)
+
+// String returns the string representation of the MACFilter.
+func (f MACFilter) String() string {
+	switch f {
+	case MACFilterAll:
+		return "all"
+	case MACFilterVirtual:
+		return "virtual"
+	default:
+		return "physical"
+	}
+}
+
+// Component names used as keys in [DiagnosticInfo].
 const (
 	ComponentCPU         = "cpu"
 	ComponentMotherboard = "motherboard"
@@ -52,7 +78,7 @@ type CommandExecutor interface {
 }
 
 // Provider configures and generates unique machine IDs.
-// After the first call to ID(), the configuration is frozen and the result is cached.
+// After the first call to [Provider.ID], the configuration is frozen and the result is cached.
 // Provider methods are safe for concurrent use after configuration is complete.
 type Provider struct {
 	commandExecutor    CommandExecutor
@@ -66,12 +92,13 @@ type Provider struct {
 	includeMotherboard bool
 	includeSystemUUID  bool
 	includeMAC         bool
+	macFilter          MACFilter
 	includeDisk        bool
 }
 
 // New creates a new Provider with default settings.
 // The provider uses real system commands by default.
-// Default format is Format64 (64 hex characters, 2^6).
+// Default format is [Format64] (64 hex characters, 2^6).
 func New() *Provider {
 	return &Provider{
 		commandExecutor: &defaultCommandExecutor{
@@ -89,7 +116,7 @@ func (p *Provider) WithSalt(salt string) *Provider {
 }
 
 // WithFormat sets the output format and length.
-// Use Format64 (default), Format32, Format128, or Format256.
+// Use [Format64] (default), [Format32], [Format128], or [Format256].
 func (p *Provider) WithFormat(mode FormatMode) *Provider {
 	p.formatMode = mode
 
@@ -118,8 +145,14 @@ func (p *Provider) WithSystemUUID() *Provider {
 }
 
 // WithMAC includes network interface MAC addresses in the generation.
-func (p *Provider) WithMAC() *Provider {
+// An optional [MACFilter] controls which interfaces are included.
+// Default is [MACFilterPhysical], which excludes virtual, VPN, bridge,
+// and container interfaces for stability.
+func (p *Provider) WithMAC(filter ...MACFilter) *Provider {
 	p.includeMAC = true
+	if len(filter) > 0 {
+		p.macFilter = filter[0]
+	}
 
 	return p
 }
@@ -165,7 +198,7 @@ func (p *Provider) VMFriendly() *Provider {
 
 // ID generates the machine ID based on the configured options.
 // It caches the result, so subsequent calls return the same ID.
-// The configuration is frozen after the first successful call to ID().
+// The configuration is frozen after the first successful call.
 // The provided context controls the timeout and cancellation of any
 // system commands executed during hardware identifier collection.
 // This method is safe for concurrent use.
@@ -224,8 +257,8 @@ func (p *Provider) Diagnostics() *DiagnosticInfo {
 	return p.diagnostics
 }
 
-// Validate checks if the provided ID matches the current machine ID.
-// The provided context is forwarded to [ID] if it needs to generate the ID.
+// Validate reports whether the provided ID matches the current machine ID.
+// The provided context is forwarded to [Provider.ID] if it needs to generate the ID.
 func (p *Provider) Validate(ctx context.Context, id string) (bool, error) {
 	currentID, err := p.ID(ctx)
 	if err != nil {
@@ -236,7 +269,7 @@ func (p *Provider) Validate(ctx context.Context, id string) (bool, error) {
 }
 
 // hashIdentifiers processes and hashes the hardware identifiers with optional salt.
-// Returns a hash formatted according to the specified FormatMode.
+// Returns a hash formatted according to the specified [FormatMode].
 func hashIdentifiers(identifiers []string, salt string, mode FormatMode) string {
 	sort.Strings(identifiers)
 	combined := strings.Join(identifiers, "|")
@@ -251,7 +284,7 @@ func hashIdentifiers(identifiers []string, salt string, mode FormatMode) string 
 	return formatHash(rawHash, mode)
 }
 
-// formatHash formats a 64-character SHA-256 hash according to the specified mode.
+// formatHash formats a 64-character SHA-256 hash according to the specified [FormatMode].
 // All formats produce power-of-2 lengths without dashes.
 func formatHash(hash string, mode FormatMode) string {
 	if len(hash) != 64 {

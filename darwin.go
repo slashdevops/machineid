@@ -76,7 +76,7 @@ func collectIdentifiers(ctx context.Context, p *Provider, diag *DiagnosticInfo) 
 
 	if p.includeMAC {
 		identifiers = appendIdentifiersIfValid(identifiers, func() ([]string, error) {
-			return collectMACAddresses(logger)
+			return collectMACAddresses(p.macFilter, logger)
 		}, "mac:", diag, ComponentMAC, logger)
 	}
 
