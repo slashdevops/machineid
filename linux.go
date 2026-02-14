@@ -52,7 +52,7 @@ func collectIdentifiers(ctx context.Context, p *Provider, diag *DiagnosticInfo) 
 	return identifiers, nil
 }
 
-// linuxCPUID retrieves CPU information from /proc/cpuinfo
+// linuxCPUID retrieves CPU information from /proc/cpuinfo.
 func linuxCPUID(logger *slog.Logger) (string, error) {
 	const path = "/proc/cpuinfo"
 
@@ -72,7 +72,7 @@ func linuxCPUID(logger *slog.Logger) (string, error) {
 	return parseCPUInfo(string(data)), nil
 }
 
-// parseCPUInfo extracts CPU information from /proc/cpuinfo content
+// parseCPUInfo extracts CPU information from /proc/cpuinfo content.
 func parseCPUInfo(content string) string {
 	lines := strings.Split(content, "\n")
 	var processor, vendorID, modelName, flags string
@@ -100,7 +100,7 @@ func parseCPUInfo(content string) string {
 	return fmt.Sprintf("%s:%s:%s:%s", processor, vendorID, modelName, flags)
 }
 
-// linuxSystemUUID retrieves system UUID from DMI
+// linuxSystemUUID retrieves system UUID from DMI.
 func linuxSystemUUID(logger *slog.Logger) (string, error) {
 	// Try multiple locations for system UUID
 	locations := []string{
@@ -111,7 +111,7 @@ func linuxSystemUUID(logger *slog.Logger) (string, error) {
 	return readFirstValidFromLocations(locations, isValidUUID, logger)
 }
 
-// linuxMotherboardSerial retrieves motherboard serial number from DMI
+// linuxMotherboardSerial retrieves motherboard serial number from DMI.
 func linuxMotherboardSerial(logger *slog.Logger) (string, error) {
 	locations := []string{
 		"/sys/class/dmi/id/board_serial",
@@ -121,7 +121,7 @@ func linuxMotherboardSerial(logger *slog.Logger) (string, error) {
 	return readFirstValidFromLocations(locations, isValidSerial, logger)
 }
 
-// linuxMachineID retrieves systemd machine ID
+// linuxMachineID retrieves systemd machine ID.
 func linuxMachineID(logger *slog.Logger) (string, error) {
 	locations := []string{
 		"/etc/machine-id",
@@ -131,7 +131,7 @@ func linuxMachineID(logger *slog.Logger) (string, error) {
 	return readFirstValidFromLocations(locations, isNonEmpty, logger)
 }
 
-// readFirstValidFromLocations reads from multiple locations until valid value found
+// readFirstValidFromLocations reads from multiple locations until a valid value is found.
 func readFirstValidFromLocations(locations []string, validator func(string) bool, logger *slog.Logger) (string, error) {
 	for _, location := range locations {
 		data, err := os.ReadFile(location)
@@ -156,17 +156,17 @@ func readFirstValidFromLocations(locations []string, validator func(string) bool
 	return "", ErrNotFound
 }
 
-// isValidUUID checks if UUID is valid (not empty or null)
+// isValidUUID reports whether the UUID is valid (not empty or null).
 func isValidUUID(uuid string) bool {
 	return uuid != "" && uuid != "00000000-0000-0000-0000-000000000000"
 }
 
-// isValidSerial checks if serial is valid (not empty or placeholder)
+// isValidSerial reports whether the serial is valid (not empty or placeholder).
 func isValidSerial(serial string) bool {
 	return serial != "" && serial != biosFirmwareMessage
 }
 
-// isNonEmpty checks if value is not empty
+// isNonEmpty reports whether the value is not empty.
 func isNonEmpty(value string) bool {
 	return value != ""
 }
@@ -232,7 +232,7 @@ func linuxDiskSerialsLSBLK(ctx context.Context, executor CommandExecutor, logger
 	return serials, nil
 }
 
-// linuxDiskSerialsSys retrieves disk serials from /sys/block
+// linuxDiskSerialsSys retrieves disk serials from /sys/block.
 func linuxDiskSerialsSys(logger *slog.Logger) ([]string, error) {
 	var serials []string
 

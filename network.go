@@ -84,7 +84,7 @@ func collectMACAddresses(filter MACFilter, logger *slog.Logger) ([]string, error
 	return macs, nil
 }
 
-// isVirtualInterface returns true if the interface name matches a known
+// isVirtualInterface reports whether the interface name matches a known
 // virtual, VPN, or bridge prefix.
 func isVirtualInterface(name string) bool {
 	lower := strings.ToLower(name)
