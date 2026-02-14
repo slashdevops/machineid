@@ -42,3 +42,10 @@ Since this is a library build in native go, the files are mostly organized follo
 - Use comments to explain complex logic or decisions.
 - Use dependency injection for services and repositories to facilitate testing and maintainability.
 - don't use `interface{}` instead use `any` for better readability.
+
+## Documentation
+
+- Use Go's built-in documentation system with `go doc` and comments.
+- Document all exported functions, types, and variables with clear and concise comments.
+- Use examples in the documentation to illustrate how to use the library effectively.
+- Keep documentation up to date with code changes. The package documentation located at `doc.go` should provide an overview of the package and its main functionalities. and the Public documentation at `README.md` should provide an overview of the project, installation instructions, usage examples, and other relevant information.

@@ -32,7 +32,7 @@ Add the module to your Go project:
 go get github.com/slashdevops/machineid
 ```
 
-Requires **Go 1.22+**. No external dependencies.
+Requires **Go 1.25+**. No external dependencies.
 
 ### CLI Tool
 

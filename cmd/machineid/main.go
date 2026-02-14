@@ -121,24 +121,24 @@ func main() {
 		provider.WithCPU().WithMotherboard().WithSystemUUID().WithMAC().WithDisk()
 	default:
 		if !*cpu && !*motherboard && !*uuid && !*mac && !*disk {
-			slog.Error("no hardware identifiers selected; use -cpu, -uuid, -all, -vm, etc.")
-			flag.Usage()
-			os.Exit(1)
-		}
-		if *cpu {
-			provider.WithCPU()
-		}
-		if *motherboard {
-			provider.WithMotherboard()
-		}
-		if *uuid {
-			provider.WithSystemUUID()
-		}
-		if *mac {
-			provider.WithMAC()
-		}
-		if *disk {
-			provider.WithDisk()
+			// Default: CPU + Motherboard + System UUID
+			provider.WithCPU().WithMotherboard().WithSystemUUID()
+		} else {
+			if *cpu {
+				provider.WithCPU()
+			}
+			if *motherboard {
+				provider.WithMotherboard()
+			}
+			if *uuid {
+				provider.WithSystemUUID()
+			}
+			if *mac {
+				provider.WithMAC()
+			}
+			if *disk {
+				provider.WithDisk()
+			}
 		}
 	}
 

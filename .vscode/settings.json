@@ -5,6 +5,7 @@
     "govulncheck",
     "machineid",
     "slashdevops",
+    "UEFI",
     "vulncheck"
   ]
 }
