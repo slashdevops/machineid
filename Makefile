@@ -204,7 +204,9 @@ build-dist-zip: ## Build the application for all platforms defined in GO_OS and 
 	$(foreach GOOS, $(GO_OS), \
 		$(foreach GOARCH, $(GO_ARCH), \
 			$(foreach proj_mod, $(PROJECT_MODULES_NAME), \
-				$(call exec_cmd, zip --junk-paths -r $(DIST_ASSETS_DIR)/$(proj_mod)-$(GOOS)-$(GOARCH).zip $(DIST_DIR)/$(proj_mod)-$(GOOS)-$(GOARCH) ) \
+				$(call exec_cmd, cp $(DIST_DIR)/$(proj_mod)-$(GOOS)-$(GOARCH) $(DIST_DIR)/$(proj_mod) ) \
+				$(call exec_cmd, zip --junk-paths -r $(DIST_ASSETS_DIR)/$(proj_mod)-$(GOOS)-$(GOARCH).zip $(DIST_DIR)/$(proj_mod) ) \
+				$(call exec_cmd, rm $(DIST_DIR)/$(proj_mod) ) \
 				$(call exec_cmd, shasum -a 256 $(DIST_ASSETS_DIR)/$(proj_mod)-$(GOOS)-$(GOARCH).zip | cut -d ' ' -f 1 > $(DIST_ASSETS_DIR)/$(proj_mod)-$(GOOS)-$(GOARCH).sha256 ) \
 			) \
 		) \

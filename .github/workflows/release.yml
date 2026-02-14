@@ -94,6 +94,23 @@ jobs:
           total_coverage=$(go tool cover -func=coverage.txt | grep total | awk '{print $3}')
           echo "**Total Coverage:** $total_coverage" >> $GITHUB_STEP_SUMMARY
 
+      - name: make build-dist
+        run: |
+          echo "## make build-dist" >> $GITHUB_STEP_SUMMARY
+          GIT_VERSION=${{ github.ref_name }} make build-dist | tee -a $GITHUB_STEP_SUMMARY
+
+      - name: make build-dist-zip
+        run: |
+          echo "## make build-dist-zip" >> $GITHUB_STEP_SUMMARY
+          GIT_VERSION=${{ github.ref_name }} make build-dist-zip | tee -a $GITHUB_STEP_SUMMARY
+
+      - name: Upload Distribution files to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: |
+            dist/assets/*.zip
+
       - name: Release
         uses: softprops/action-gh-release@v2
         with:

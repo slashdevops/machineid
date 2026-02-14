@@ -82,11 +82,9 @@ export GIT_REPO="machineid"
 export OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 export OS_ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')
 export ASSETS_NAME=$(gh release view --repo ${GIT_ORG}/${GIT_REPO} --json assets -q "[.assets[] | select(.name | contains(\"${TOOL_NAME}\") and contains(\"${OS}\") and contains(\"${OS_ARCH}\"))] | sort_by(.createdAt) | last.name")
-export APP_NAME="${ASSETS_NAME%.*}"
 
 gh release download --repo $GIT_ORG/$GIT_REPO --pattern $ASSETS_NAME
 unzip $ASSETS_NAME
-mv $APP_NAME $TOOL_NAME
 rm $ASSETS_NAME
 
 mv $TOOL_NAME ~/go/bin/$TOOL_NAME
