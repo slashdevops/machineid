@@ -1,0 +1,105 @@
+name: Release
+
+# https://help.github.com/es/actions/reference/workflow-syntax-for-github-actions#filter-pattern-cheat-sheet
+on:
+  push:
+    tags:
+      - v[0-9].[0-9]+.[0-9]*
+
+permissions:
+  id-token: write
+  security-events: write
+  actions: write
+  contents: write
+  pull-requests: read
+  packages: write
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v6
+
+      - name: Set up Go 1.x
+        id: go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: ./go.mod
+
+      - name: Summary Information
+        run: |
+          echo "# Build Summary" > $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Repository:** ${{ github.repository }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Who merge:** ${{ github.triggering_actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit ID:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+      - name: Lines of code
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          export TOOL_NAME="scc"
+          export GIT_ORG="boyter"
+          export GIT_REPO="scc"
+          export OS=$(uname -s)
+          export OS_ARCH=$(uname -m)
+          # Normalize architecture names to match asset naming
+          [[ "$OS_ARCH" == "aarch64" ]] && OS_ARCH="arm64"
+          [[ "$OS_ARCH" == "x86_64" ]] && OS_ARCH="x86_64"
+          export ASSETS_NAME=$(gh release view --repo ${GIT_ORG}/${GIT_REPO} --json assets -q "[.assets[] | select(.name | contains(\"${TOOL_NAME}\") and contains(\"${OS}\") and contains(\"${OS_ARCH}\"))] | sort_by(.createdAt) | last.name")
+
+          gh release download --repo $GIT_ORG/$GIT_REPO --pattern $ASSETS_NAME
+
+          # Extract based on file extension
+          if [[ "$ASSETS_NAME" == *.tar.gz ]]; then
+            tar -xzf $ASSETS_NAME
+          elif [[ "$ASSETS_NAME" == *.zip ]]; then
+            unzip $ASSETS_NAME
+          fi
+
+          rm $ASSETS_NAME
+
+          mv $TOOL_NAME ~/go/bin/$TOOL_NAME
+          ~/go/bin/$TOOL_NAME --version
+
+          # go install github.com/boyter/scc/v3@latest
+
+          scc --format html-table . | tee -a $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+      - name: Test
+        run: |
+          echo "### Test report" >> $GITHUB_STEP_SUMMARY
+
+          go test -race -coverprofile=coverage.txt -covermode=atomic -tags=unit ./... | tee -a $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+      - name: Test coverage
+        run: |
+          echo "## Test Coverage" >> $GITHUB_STEP_SUMMARY
+
+          # Generate coverage report using standard library tools
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Coverage report" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          go tool cover -func=coverage.txt | tee -a $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Calculate total coverage percentage
+          total_coverage=$(go tool cover -func=coverage.txt | grep total | awk '{print $3}')
+          echo "**Total Coverage:** $total_coverage" >> $GITHUB_STEP_SUMMARY
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          make_latest: true
