@@ -22,6 +22,7 @@ func main() {
 	motherboard := flag.Bool("motherboard", false, "Include motherboard serial number")
 	uuid := flag.Bool("uuid", false, "Include system UUID")
 	mac := flag.Bool("mac", false, "Include network MAC addresses")
+	macFilterFlag := flag.String("mac-filter", "physical", "MAC filter: physical, all, virtual")
 	disk := flag.Bool("disk", false, "Include disk serial numbers")
 	all := flag.Bool("all", false, "Include all hardware identifiers")
 	vm := flag.Bool("vm", false, "Use VM-friendly mode (CPU + UUID only)")
@@ -134,11 +135,18 @@ func main() {
 		provider.WithSalt(*salt)
 	}
 
+	mFilter, err := parseMACFilter(*macFilterFlag)
+	if err != nil {
+		slog.Error("invalid mac-filter", "error", err)
+		flag.Usage()
+		os.Exit(1)
+	}
+
 	switch {
 	case *vm:
 		provider.VMFriendly()
 	case *all:
-		provider.WithCPU().WithMotherboard().WithSystemUUID().WithMAC().WithDisk()
+		provider.WithCPU().WithMotherboard().WithSystemUUID().WithMAC(mFilter).WithDisk()
 	default:
 		if !*cpu && !*motherboard && !*uuid && !*mac && !*disk {
 			// Default: CPU + Motherboard + System UUID
@@ -154,7 +162,7 @@ func main() {
 				provider.WithSystemUUID()
 			}
 			if *mac {
-				provider.WithMAC()
+				provider.WithMAC(mFilter)
 			}
 			if *disk {
 				provider.WithDisk()
@@ -210,6 +218,19 @@ func parseFormatMode(format int) (machineid.FormatMode, error) {
 		return machineid.Format256, nil
 	default:
 		return 0, fmt.Errorf("unsupported format %d; valid values are 32, 64, 128, 256", format)
+	}
+}
+
+func parseMACFilter(value string) (machineid.MACFilter, error) {
+	switch strings.ToLower(value) {
+	case "physical":
+		return machineid.MACFilterPhysical, nil
+	case "all":
+		return machineid.MACFilterAll, nil
+	case "virtual":
+		return machineid.MACFilterVirtual, nil
+	default:
+		return 0, fmt.Errorf("unsupported mac-filter %q; valid values are physical, all, virtual", value)
 	}
 }
 

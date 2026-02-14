@@ -693,6 +693,69 @@ func TestFormatValidation(t *testing.T) {
 	}
 }
 
+// TestWithMACBackwardCompatibility tests that WithMAC() with no args works as before.
+func TestWithMACBackwardCompatibility(t *testing.T) {
+	// WithMAC() with no args should work (physical filter, same as current behavior)
+	g := machineid.New().WithCPU().WithSystemUUID().WithMAC()
+
+	id, err := g.ID(context.Background())
+	if err != nil {
+		t.Fatalf("WithMAC() error = %v", err)
+	}
+
+	if len(id) != 64 {
+		t.Errorf("WithMAC() ID length = %d, want 64", len(id))
+	}
+}
+
+// TestWithMACFilter tests WithMAC with explicit filter modes.
+func TestWithMACFilter(t *testing.T) {
+	filters := []struct {
+		name   string
+		filter machineid.MACFilter
+	}{
+		{"physical", machineid.MACFilterPhysical},
+		{"all", machineid.MACFilterAll},
+		{"virtual", machineid.MACFilterVirtual},
+	}
+
+	for _, tt := range filters {
+		t.Run(tt.name, func(t *testing.T) {
+			g := machineid.New().WithCPU().WithSystemUUID().WithMAC(tt.filter)
+
+			id, err := g.ID(context.Background())
+			if err != nil {
+				t.Fatalf("WithMAC(%s) error = %v", tt.name, err)
+			}
+
+			if len(id) != 64 {
+				t.Errorf("WithMAC(%s) ID length = %d, want 64", tt.name, len(id))
+			}
+		})
+	}
+}
+
+// TestWithMACFilterAffectsID tests that different MAC filters can produce different IDs.
+func TestWithMACFilterAffectsID(t *testing.T) {
+	physical := machineid.New().WithMAC(machineid.MACFilterPhysical).WithCPU()
+	all := machineid.New().WithMAC(machineid.MACFilterAll).WithCPU()
+
+	idPhysical, err := physical.ID(context.Background())
+	if err != nil {
+		t.Fatalf("physical ID error: %v", err)
+	}
+
+	idAll, err := all.ID(context.Background())
+	if err != nil {
+		t.Fatalf("all ID error: %v", err)
+	}
+
+	// They may or may not differ depending on the system, just verify both are valid
+	if len(idPhysical) != 64 || len(idAll) != 64 {
+		t.Errorf("Expected 64-char IDs, got physical=%d, all=%d", len(idPhysical), len(idAll))
+	}
+}
+
 // TestFormatPowerOfTwo verifies that all format lengths are powers of 2.
 func TestFormatPowerOfTwo(t *testing.T) {
 	formats := []struct {

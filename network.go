@@ -26,9 +26,9 @@ var virtualInterfacePrefixes = []string{
 	"vnic", "vboxnet",
 }
 
-// collectMACAddresses retrieves MAC addresses from physical network interfaces.
-// Virtual, VPN, bridge, and container interfaces are excluded for stability.
-func collectMACAddresses(logger *slog.Logger) ([]string, error) {
+// collectMACAddresses retrieves MAC addresses from network interfaces filtered
+// by the given [MACFilter]. Loopback and down interfaces are always excluded.
+func collectMACAddresses(filter MACFilter, logger *slog.Logger) ([]string, error) {
 	interfaces, err := net.Interfaces()
 	if err != nil {
 		return nil, err
@@ -51,17 +51,31 @@ func collectMACAddresses(logger *slog.Logger) ([]string, error) {
 			continue
 		}
 
-		// Skip virtual/VPN/bridge interfaces that are not stable hardware.
-		if isVirtualInterface(i.Name) {
-			if logger != nil {
-				logger.Debug("skipping virtual interface", "interface", i.Name)
-			}
+		virtual := isVirtualInterface(i.Name)
 
-			continue
+		switch filter {
+		case MACFilterPhysical:
+			if virtual {
+				if logger != nil {
+					logger.Debug("skipping virtual interface", "interface", i.Name)
+				}
+
+				continue
+			}
+		case MACFilterVirtual:
+			if !virtual {
+				if logger != nil {
+					logger.Debug("skipping physical interface", "interface", i.Name)
+				}
+
+				continue
+			}
+		case MACFilterAll:
+			// Include everything that passed loopback/up checks.
 		}
 
 		if logger != nil {
-			logger.Debug("including interface", "interface", i.Name, "mac", i.HardwareAddr.String())
+			logger.Debug("including interface", "interface", i.Name, "mac", i.HardwareAddr.String(), "virtual", virtual)
 		}
 
 		macs = append(macs, i.HardwareAddr.String())

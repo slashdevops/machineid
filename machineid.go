@@ -26,6 +26,32 @@ const (
 	Format256
 )
 
+// MACFilter controls which network interfaces are included in MAC address collection.
+type MACFilter int
+
+const (
+	// MACFilterPhysical includes only physical network interfaces (default).
+	// Virtual, VPN, bridge, and container interfaces are excluded.
+	MACFilterPhysical MACFilter = iota
+	// MACFilterAll includes all non-loopback, up network interfaces (physical and virtual).
+	MACFilterAll
+	// MACFilterVirtual includes only virtual network interfaces
+	// (VPN, bridge, container, and hypervisor interfaces).
+	MACFilterVirtual
+)
+
+// String returns the string representation of the MACFilter.
+func (f MACFilter) String() string {
+	switch f {
+	case MACFilterAll:
+		return "all"
+	case MACFilterVirtual:
+		return "virtual"
+	default:
+		return "physical"
+	}
+}
+
 // Component names used as keys in DiagnosticInfo.
 const (
 	ComponentCPU         = "cpu"
@@ -66,6 +92,7 @@ type Provider struct {
 	includeMotherboard bool
 	includeSystemUUID  bool
 	includeMAC         bool
+	macFilter          MACFilter
 	includeDisk        bool
 }
 
@@ -118,8 +145,14 @@ func (p *Provider) WithSystemUUID() *Provider {
 }
 
 // WithMAC includes network interface MAC addresses in the generation.
-func (p *Provider) WithMAC() *Provider {
+// An optional [MACFilter] controls which interfaces are included.
+// Default is [MACFilterPhysical], which excludes virtual, VPN, bridge,
+// and container interfaces for stability.
+func (p *Provider) WithMAC(filter ...MACFilter) *Provider {
 	p.includeMAC = true
+	if len(filter) > 0 {
+		p.macFilter = filter[0]
+	}
 
 	return p
 }

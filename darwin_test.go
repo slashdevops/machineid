@@ -635,7 +635,7 @@ func TestCollectMACAddressesWithLogger(t *testing.T) {
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
-	macs, err := collectMACAddresses(logger)
+	macs, err := collectMACAddresses(MACFilterPhysical, logger)
 	if err != nil {
 		t.Logf("collectMACAddresses error (may be expected): %v", err)
 		return

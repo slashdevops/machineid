@@ -29,11 +29,31 @@
 //   - [Provider.WithCPU] — processor identifier and feature flags
 //   - [Provider.WithMotherboard] — motherboard / baseboard serial number
 //   - [Provider.WithSystemUUID] — BIOS / UEFI system UUID
-//   - [Provider.WithMAC] — MAC addresses of physical network interfaces
+//   - [Provider.WithMAC] — MAC addresses of network interfaces (filterable)
 //   - [Provider.WithDisk] — serial numbers of internal disks
 //
 // Or use [Provider.VMFriendly] to select a minimal, virtual-machine-safe
 // subset (CPU + System UUID).
+//
+// # MAC Address Filtering
+//
+// [Provider.WithMAC] accepts an optional [MACFilter] to control which network
+// interfaces contribute to the machine ID:
+//
+//   - [MACFilterPhysical] — only physical interfaces (default)
+//   - [MACFilterAll] — all non-loopback, up interfaces (physical + virtual)
+//   - [MACFilterVirtual] — only virtual interfaces (VPN, bridge, container)
+//
+// Examples:
+//
+//	// Physical interfaces only (default, most stable)
+//	provider.WithMAC()
+//
+//	// Include all interfaces
+//	provider.WithMAC(machineid.MACFilterAll)
+//
+//	// Only virtual interfaces (containers, VPNs)
+//	provider.WithMAC(machineid.MACFilterVirtual)
 //
 // # Output Formats
 //
@@ -159,6 +179,7 @@
 //	machineid -cpu -uuid
 //	machineid -all -format 32 -json
 //	machineid -vm -salt "my-app" -diagnostics
+//	machineid -mac -mac-filter all
 //	machineid -cpu -uuid -verbose
 //	machineid -all -debug
 //	machineid -version
