@@ -35,6 +35,10 @@ func main() {
 	diagnostics := flag.Bool("diagnostics", false, "Show diagnostic information about collected components")
 	jsonOutput := flag.Bool("json", false, "Output result as JSON")
 
+	// Logging flags
+	verbose := flag.Bool("verbose", false, "Enable info-level logging to stderr (fallbacks, lifecycle)")
+	debugFlag := flag.Bool("debug", false, "Enable debug-level logging to stderr (command details, raw values, timing)")
+
 	// Info flags
 	versionFlag := flag.Bool("version", false, "Show version information")
 	versionLongFlag := flag.Bool("version.long", false, "Show detailed version information")
@@ -50,6 +54,8 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  machineid -cpu -uuid -diagnostics             Show collected components\n")
 		fmt.Fprintf(os.Stderr, "  machineid -cpu -uuid -validate <id>           Validate an existing ID\n")
 		fmt.Fprintf(os.Stderr, "  machineid -cpu -uuid -json                    Output as JSON\n")
+		fmt.Fprintf(os.Stderr, "  machineid -cpu -uuid -verbose                 Show info-level logs\n")
+		fmt.Fprintf(os.Stderr, "  machineid -all -debug                         Show debug-level logs\n")
 		fmt.Fprintf(os.Stderr, "  machineid -version                            Show version\n")
 		fmt.Fprintf(os.Stderr, "  machineid -version.long                       Show detailed version\n")
 	}
@@ -108,8 +114,21 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Configure logger
+	if *debugFlag {
+		logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+		slog.SetDefault(logger)
+	} else if *verbose {
+		logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+		slog.SetDefault(logger)
+	}
+
 	// Build provider
 	provider := machineid.New().WithFormat(formatMode)
+
+	if *verbose || *debugFlag {
+		provider.WithLogger(slog.Default())
+	}
 
 	if *salt != "" {
 		provider.WithSalt(*salt)

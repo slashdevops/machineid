@@ -4,7 +4,6 @@ package machineid
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -18,7 +17,9 @@ func collectIdentifiers(ctx context.Context, p *Provider, diag *DiagnosticInfo) 
 	logger := p.logger
 
 	if p.includeCPU {
-		identifiers = appendIdentifierIfValid(identifiers, linuxCPUID, "cpu:", diag, ComponentCPU, logger)
+		identifiers = appendIdentifierIfValid(identifiers, func() (string, error) {
+			return linuxCPUID(logger)
+		}, "cpu:", diag, ComponentCPU, logger)
 	}
 
 	if p.includeSystemUUID {
@@ -52,10 +53,20 @@ func collectIdentifiers(ctx context.Context, p *Provider, diag *DiagnosticInfo) 
 }
 
 // linuxCPUID retrieves CPU information from /proc/cpuinfo
-func linuxCPUID() (string, error) {
-	data, err := os.ReadFile("/proc/cpuinfo")
+func linuxCPUID(logger *slog.Logger) (string, error) {
+	const path = "/proc/cpuinfo"
+
+	data, err := os.ReadFile(path)
 	if err != nil {
+		if logger != nil {
+			logger.Debug("failed to read CPU info", "path", path, "error", err)
+		}
+
 		return "", err
+	}
+
+	if logger != nil {
+		logger.Debug("read CPU info", "path", path)
 	}
 
 	return parseCPUInfo(string(data)), nil
@@ -142,7 +153,7 @@ func readFirstValidFromLocations(locations []string, validator func(string) bool
 		}
 	}
 
-	return "", errors.New("valid value not found in any location")
+	return "", ErrNotFound
 }
 
 // isValidUUID checks if UUID is valid (not empty or null)
@@ -175,16 +186,28 @@ func linuxDiskSerials(ctx context.Context, executor CommandExecutor, logger *slo
 				serials = append(serials, s)
 			}
 		}
+
+		if logger != nil {
+			logger.Debug("collected disk serials via lsblk", "count", len(lsblkSerials))
+		}
+	} else if logger != nil {
+		logger.Debug("lsblk failed, trying /sys/block", "error", err)
 	}
 
 	// Try reading from /sys/block
-	if sysSerials, err := linuxDiskSerialsSys(); err == nil {
+	if sysSerials, err := linuxDiskSerialsSys(logger); err == nil {
 		for _, s := range sysSerials {
 			if _, exists := seen[s]; !exists {
 				seen[s] = struct{}{}
 				serials = append(serials, s)
 			}
 		}
+
+		if logger != nil {
+			logger.Debug("collected disk serials via /sys/block", "count", len(sysSerials))
+		}
+	} else if logger != nil {
+		logger.Debug("/sys/block read failed", "error", err)
 	}
 
 	return serials, nil
@@ -194,7 +217,7 @@ func linuxDiskSerials(ctx context.Context, executor CommandExecutor, logger *slo
 func linuxDiskSerialsLSBLK(ctx context.Context, executor CommandExecutor, logger *slog.Logger) ([]string, error) {
 	output, err := executeCommand(ctx, executor, logger, "lsblk", "-d", "-n", "-o", "SERIAL")
 	if err != nil {
-		return nil, fmt.Errorf("failed to get disk serials: %w", err)
+		return nil, err
 	}
 
 	var serials []string
@@ -210,7 +233,7 @@ func linuxDiskSerialsLSBLK(ctx context.Context, executor CommandExecutor, logger
 }
 
 // linuxDiskSerialsSys retrieves disk serials from /sys/block
-func linuxDiskSerialsSys() ([]string, error) {
+func linuxDiskSerialsSys(logger *slog.Logger) ([]string, error) {
 	var serials []string
 
 	blockDir := "/sys/block"
@@ -226,6 +249,10 @@ func linuxDiskSerialsSys() ([]string, error) {
 				serial := strings.TrimSpace(string(data))
 				if serial != "" {
 					serials = append(serials, serial)
+
+					if logger != nil {
+						logger.Debug("read disk serial from sysfs", "disk", entry.Name(), "path", serialFile)
+					}
 				}
 			}
 		}

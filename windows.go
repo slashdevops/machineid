@@ -4,8 +4,6 @@ package machineid
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"log/slog"
 	"strings"
 )
@@ -64,7 +62,7 @@ func parseWmicValue(output, prefix string) (string, error) {
 		}
 	}
 
-	return "", fmt.Errorf("value with prefix %s not found", prefix)
+	return "", &ParseError{Source: "wmic output", Err: ErrNotFound}
 }
 
 // parseWmicMultipleValues extracts all values from wmic output with given prefix.
@@ -90,7 +88,7 @@ func parseWmicMultipleValues(output, prefix string) []string {
 func parsePowerShellValue(output string) (string, error) {
 	value := strings.TrimSpace(output)
 	if value == "" {
-		return "", errors.New("empty value from PowerShell")
+		return "", &ParseError{Source: "PowerShell output", Err: ErrEmptyValue}
 	}
 
 	return value, nil
@@ -117,6 +115,8 @@ func windowsCPUID(ctx context.Context, executor CommandExecutor, logger *slog.Lo
 	if err == nil {
 		if value, parseErr := parseWmicValue(output, "ProcessorId="); parseErr == nil {
 			return value, nil
+		} else if logger != nil {
+			logger.Debug("wmic CPU ID parsing failed", "error", parseErr)
 		}
 	}
 
@@ -128,7 +128,11 @@ func windowsCPUID(ctx context.Context, executor CommandExecutor, logger *slog.Lo
 	psOutput, psErr := executeCommand(ctx, executor, logger, "powershell", "-Command",
 		"Get-CimInstance -ClassName Win32_Processor | Select-Object -ExpandProperty ProcessorId")
 	if psErr != nil {
-		return "", fmt.Errorf("failed to get CPU ID: wmic: %w, powershell: %w", err, psErr)
+		if logger != nil {
+			logger.Warn("all CPU ID methods failed")
+		}
+
+		return "", ErrAllMethodsFailed
 	}
 
 	return parsePowerShellValue(psOutput)
@@ -140,6 +144,8 @@ func windowsMotherboardSerial(ctx context.Context, executor CommandExecutor, log
 	if err == nil {
 		if value, parseErr := parseWmicValue(output, "SerialNumber="); parseErr == nil {
 			return value, nil
+		} else if logger != nil {
+			logger.Debug("wmic motherboard serial parsing failed", "error", parseErr)
 		}
 	}
 
@@ -151,7 +157,11 @@ func windowsMotherboardSerial(ctx context.Context, executor CommandExecutor, log
 	psOutput, psErr := executeCommand(ctx, executor, logger, "powershell", "-Command",
 		"Get-CimInstance -ClassName Win32_BaseBoard | Select-Object -ExpandProperty SerialNumber")
 	if psErr != nil {
-		return "", fmt.Errorf("failed to get motherboard serial: wmic: %w, powershell: %w", err, psErr)
+		if logger != nil {
+			logger.Warn("all motherboard serial methods failed")
+		}
+
+		return "", ErrAllMethodsFailed
 	}
 
 	value, parseErr := parsePowerShellValue(psOutput)
@@ -160,7 +170,7 @@ func windowsMotherboardSerial(ctx context.Context, executor CommandExecutor, log
 	}
 
 	if value == biosFirmwareMessage {
-		return "", errors.New("motherboard serial is OEM placeholder")
+		return "", &ParseError{Source: "PowerShell output", Err: ErrOEMPlaceholder}
 	}
 
 	return value, nil
@@ -173,6 +183,8 @@ func windowsSystemUUID(ctx context.Context, executor CommandExecutor, logger *sl
 	if err == nil {
 		if value, parseErr := parseWmicValue(output, "UUID="); parseErr == nil {
 			return value, nil
+		} else if logger != nil {
+			logger.Debug("wmic UUID parsing failed", "error", parseErr)
 		}
 	}
 
@@ -189,7 +201,7 @@ func windowsSystemUUIDViaPowerShell(ctx context.Context, executor CommandExecuto
 	output, err := executeCommand(ctx, executor, logger, "powershell", "-Command",
 		"Get-CimInstance -ClassName Win32_ComputerSystemProduct | Select-Object -ExpandProperty UUID")
 	if err != nil {
-		return "", fmt.Errorf("failed to get UUID via PowerShell: %w", err)
+		return "", err
 	}
 
 	return parsePowerShellValue(output)
@@ -202,6 +214,10 @@ func windowsDiskSerials(ctx context.Context, executor CommandExecutor, logger *s
 		if values := parseWmicMultipleValues(output, "SerialNumber="); len(values) > 0 {
 			return values, nil
 		}
+
+		if logger != nil {
+			logger.Debug("wmic returned no disk serials")
+		}
 	}
 
 	// Fallback to PowerShell Get-CimInstance
@@ -212,12 +228,16 @@ func windowsDiskSerials(ctx context.Context, executor CommandExecutor, logger *s
 	psOutput, psErr := executeCommand(ctx, executor, logger, "powershell", "-Command",
 		"Get-CimInstance -ClassName Win32_DiskDrive | Select-Object -ExpandProperty SerialNumber")
 	if psErr != nil {
-		return nil, fmt.Errorf("failed to get disk serials: wmic: %w, powershell: %w", err, psErr)
+		if logger != nil {
+			logger.Warn("all disk serial methods failed")
+		}
+
+		return nil, ErrAllMethodsFailed
 	}
 
 	values := parsePowerShellMultipleValues(psOutput)
 	if len(values) == 0 {
-		return nil, errors.New("no disk serials found via PowerShell")
+		return nil, &ParseError{Source: "PowerShell output", Err: ErrNotFound}
 	}
 
 	return values, nil
