@@ -1,10 +1,14 @@
 {
   "cSpell.words": [
     "betteralign",
+    "CPUID",
+    "csproduct",
+    "diskdrive",
     "Errorf",
     "golangci",
     "govulncheck",
     "ioreg",
+    "machdep",
     "machineid",
     "OSCPU",
     "slashdevops",
