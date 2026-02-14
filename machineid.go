@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"log/slog"
 	"runtime"
@@ -12,21 +11,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-)
-
-// Sentinel errors returned by [Provider.ID].
-var (
-	// ErrNoIdentifiers is returned when no hardware identifiers could be
-	// collected with the current configuration.
-	ErrNoIdentifiers = errors.New("no hardware identifiers found with current configuration")
-
-	// ErrEmptyValue is returned in [DiagnosticInfo.Errors] when a hardware
-	// component returned an empty value.
-	ErrEmptyValue = errors.New("empty value returned")
-
-	// ErrNoValues is returned in [DiagnosticInfo.Errors] when a hardware
-	// component returned no values.
-	ErrNoValues = errors.New("no values found")
 )
 
 // FormatMode defines the output format and length of the machine ID.
@@ -353,8 +337,9 @@ func (p *Provider) enabledComponents() []string {
 func appendIdentifierIfValid(identifiers []string, getValue func() (string, error), prefix string, diag *DiagnosticInfo, component string, logger *slog.Logger) []string {
 	value, err := getValue()
 	if err != nil {
+		compErr := &ComponentError{Component: component, Err: err}
 		if diag != nil {
-			diag.Errors[component] = err
+			diag.Errors[component] = compErr
 		}
 		if logger != nil {
 			logger.Warn("component failed", "component", component, "error", err)
@@ -364,8 +349,9 @@ func appendIdentifierIfValid(identifiers []string, getValue func() (string, erro
 	}
 
 	if value == "" {
+		compErr := &ComponentError{Component: component, Err: ErrEmptyValue}
 		if diag != nil {
-			diag.Errors[component] = ErrEmptyValue
+			diag.Errors[component] = compErr
 		}
 		if logger != nil {
 			logger.Warn("component returned empty value", "component", component)
@@ -390,8 +376,9 @@ func appendIdentifierIfValid(identifiers []string, getValue func() (string, erro
 func appendIdentifiersIfValid(identifiers []string, getValues func() ([]string, error), prefix string, diag *DiagnosticInfo, component string, logger *slog.Logger) []string {
 	values, err := getValues()
 	if err != nil {
+		compErr := &ComponentError{Component: component, Err: err}
 		if diag != nil {
-			diag.Errors[component] = err
+			diag.Errors[component] = compErr
 		}
 		if logger != nil {
 			logger.Warn("component failed", "component", component, "error", err)
@@ -401,8 +388,9 @@ func appendIdentifiersIfValid(identifiers []string, getValues func() ([]string, 
 	}
 
 	if len(values) == 0 {
+		compErr := &ComponentError{Component: component, Err: ErrNoValues}
 		if diag != nil {
-			diag.Errors[component] = ErrNoValues
+			diag.Errors[component] = compErr
 		}
 		if logger != nil {
 			logger.Warn("component returned no values", "component", component)

@@ -160,8 +160,19 @@ func TestAppendIdentifierIfValidEmpty(t *testing.T) {
 	if len(result) != 1 {
 		t.Errorf("Expected 1 identifier, got %d", len(result))
 	}
-	if _, ok := diag.Errors["test"]; !ok {
-		t.Error("Expected error recorded in diagnostics for empty value")
+	diagErr, ok := diag.Errors["test"]
+	if !ok {
+		t.Fatal("Expected error recorded in diagnostics for empty value")
+	}
+	if !errors.Is(diagErr, ErrEmptyValue) {
+		t.Errorf("Expected ErrEmptyValue in diagnostic, got %v", diagErr)
+	}
+	var compErr *ComponentError
+	if !errors.As(diagErr, &compErr) {
+		t.Fatal("Expected ComponentError in diagnostic")
+	}
+	if compErr.Component != "test" {
+		t.Errorf("ComponentError.Component = %q, want %q", compErr.Component, "test")
 	}
 }
 
@@ -176,8 +187,16 @@ func TestAppendIdentifierIfValidError(t *testing.T) {
 	if len(result) != 1 {
 		t.Errorf("Expected 1 identifier (original), got %d", len(result))
 	}
-	if _, ok := diag.Errors["test"]; !ok {
-		t.Error("Expected error recorded in diagnostics")
+	diagErr, ok := diag.Errors["test"]
+	if !ok {
+		t.Fatal("Expected error recorded in diagnostics")
+	}
+	var compErr *ComponentError
+	if !errors.As(diagErr, &compErr) {
+		t.Fatal("Expected ComponentError in diagnostic")
+	}
+	if compErr.Component != "test" {
+		t.Errorf("ComponentError.Component = %q, want %q", compErr.Component, "test")
 	}
 }
 
@@ -221,8 +240,16 @@ func TestAppendIdentifiersIfValidError(t *testing.T) {
 	if len(result) != 1 {
 		t.Errorf("Expected 1 identifier (original), got %d", len(result))
 	}
-	if _, ok := diag.Errors["test"]; !ok {
-		t.Error("Expected error recorded in diagnostics")
+	diagErr, ok := diag.Errors["test"]
+	if !ok {
+		t.Fatal("Expected error recorded in diagnostics")
+	}
+	var compErr *ComponentError
+	if !errors.As(diagErr, &compErr) {
+		t.Fatal("Expected ComponentError in diagnostic")
+	}
+	if compErr.Component != "test" {
+		t.Errorf("ComponentError.Component = %q, want %q", compErr.Component, "test")
 	}
 }
 

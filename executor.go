@@ -2,7 +2,6 @@ package machineid
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"os/exec"
 	"strings"
@@ -28,7 +27,7 @@ func (e *defaultCommandExecutor) Execute(ctx context.Context, name string, args 
 	cmd := exec.CommandContext(timeoutCtx, name, args...)
 	output, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("command %q failed: %w", name, err)
+		return "", &CommandError{Command: name, Err: err}
 	}
 
 	return strings.TrimSpace(string(output)), nil

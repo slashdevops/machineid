@@ -4,7 +4,6 @@ package machineid
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -142,7 +141,7 @@ func readFirstValidFromLocations(locations []string, validator func(string) bool
 		}
 	}
 
-	return "", errors.New("valid value not found in any location")
+	return "", fmt.Errorf("valid value not found in any location: %w", ErrNotFound)
 }
 
 // isValidUUID checks if UUID is valid (not empty or null)

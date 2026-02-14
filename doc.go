@@ -92,6 +92,32 @@
 //   - Warn: component failed or returned empty value
 //   - Debug: command execution details, raw hardware values, timing
 //
+// # Errors
+//
+// The package provides sentinel errors for programmatic error handling:
+//
+//   - [ErrNoIdentifiers] — no hardware identifiers collected
+//   - [ErrEmptyValue] — a component returned an empty value
+//   - [ErrNoValues] — a multi-value component returned no values
+//   - [ErrNotFound] — a value was not found in command output or system files
+//   - [ErrOEMPlaceholder] — a value matches a BIOS/UEFI OEM placeholder
+//   - [ErrAllMethodsFailed] — all collection methods for a component were exhausted
+//
+// Typed errors provide structured context for [errors.As]:
+//
+//   - [CommandError] — a system command execution failed (includes the command name)
+//   - [ParseError] — output parsing failed (includes the data source)
+//   - [ComponentError] — a hardware component failed (includes the component name)
+//
+// Errors in [DiagnosticInfo.Errors] are wrapped in [ComponentError], so callers
+// can inspect both the component name and the underlying cause:
+//
+//	var compErr *machineid.ComponentError
+//	if errors.As(diag.Errors["cpu"], &compErr) {
+//		fmt.Println("component:", compErr.Component)
+//		fmt.Println("cause:", compErr.Err)
+//	}
+//
 // # Thread Safety
 //
 // A [Provider] is safe for concurrent use after configuration is complete.

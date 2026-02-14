@@ -4,7 +4,6 @@ package machineid
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -64,7 +63,7 @@ func parseWmicValue(output, prefix string) (string, error) {
 		}
 	}
 
-	return "", fmt.Errorf("value with prefix %s not found", prefix)
+	return "", fmt.Errorf("value with prefix %s: %w", prefix, ErrNotFound)
 }
 
 // parseWmicMultipleValues extracts all values from wmic output with given prefix.
@@ -90,7 +89,7 @@ func parseWmicMultipleValues(output, prefix string) []string {
 func parsePowerShellValue(output string) (string, error) {
 	value := strings.TrimSpace(output)
 	if value == "" {
-		return "", errors.New("empty value from PowerShell")
+		return "", fmt.Errorf("empty value from PowerShell: %w", ErrEmptyValue)
 	}
 
 	return value, nil
@@ -128,7 +127,7 @@ func windowsCPUID(ctx context.Context, executor CommandExecutor, logger *slog.Lo
 	psOutput, psErr := executeCommand(ctx, executor, logger, "powershell", "-Command",
 		"Get-CimInstance -ClassName Win32_Processor | Select-Object -ExpandProperty ProcessorId")
 	if psErr != nil {
-		return "", fmt.Errorf("failed to get CPU ID: wmic: %w, powershell: %w", err, psErr)
+		return "", fmt.Errorf("failed to get CPU ID (wmic: %v, powershell: %v): %w", err, psErr, ErrAllMethodsFailed)
 	}
 
 	return parsePowerShellValue(psOutput)
@@ -151,7 +150,7 @@ func windowsMotherboardSerial(ctx context.Context, executor CommandExecutor, log
 	psOutput, psErr := executeCommand(ctx, executor, logger, "powershell", "-Command",
 		"Get-CimInstance -ClassName Win32_BaseBoard | Select-Object -ExpandProperty SerialNumber")
 	if psErr != nil {
-		return "", fmt.Errorf("failed to get motherboard serial: wmic: %w, powershell: %w", err, psErr)
+		return "", fmt.Errorf("failed to get motherboard serial (wmic: %v, powershell: %v): %w", err, psErr, ErrAllMethodsFailed)
 	}
 
 	value, parseErr := parsePowerShellValue(psOutput)
@@ -160,7 +159,7 @@ func windowsMotherboardSerial(ctx context.Context, executor CommandExecutor, log
 	}
 
 	if value == biosFirmwareMessage {
-		return "", errors.New("motherboard serial is OEM placeholder")
+		return "", fmt.Errorf("motherboard serial is OEM placeholder: %w", ErrOEMPlaceholder)
 	}
 
 	return value, nil
@@ -212,12 +211,12 @@ func windowsDiskSerials(ctx context.Context, executor CommandExecutor, logger *s
 	psOutput, psErr := executeCommand(ctx, executor, logger, "powershell", "-Command",
 		"Get-CimInstance -ClassName Win32_DiskDrive | Select-Object -ExpandProperty SerialNumber")
 	if psErr != nil {
-		return nil, fmt.Errorf("failed to get disk serials: wmic: %w, powershell: %w", err, psErr)
+		return nil, fmt.Errorf("failed to get disk serials (wmic: %v, powershell: %v): %w", err, psErr, ErrAllMethodsFailed)
 	}
 
 	values := parsePowerShellMultipleValues(psOutput)
 	if len(values) == 0 {
-		return nil, errors.New("no disk serials found via PowerShell")
+		return nil, fmt.Errorf("no disk serials found via PowerShell: %w", ErrNotFound)
 	}
 
 	return values, nil

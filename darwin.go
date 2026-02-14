@@ -5,7 +5,6 @@ package machineid
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"regexp"
@@ -122,7 +121,7 @@ func macOSHardwareUUIDViaIOReg(ctx context.Context, executor CommandExecutor, lo
 		return match[1], nil
 	}
 
-	return "", errors.New("hardware UUID not found in ioreg output")
+	return "", fmt.Errorf("hardware UUID not found in ioreg output: %w", ErrNotFound)
 }
 
 // macOSSerialNumber retrieves system serial number.
@@ -157,7 +156,7 @@ func macOSSerialNumberViaIOReg(ctx context.Context, executor CommandExecutor, lo
 		return match[1], nil
 	}
 
-	return "", errors.New("serial number not found in ioreg output")
+	return "", fmt.Errorf("serial number not found in ioreg output: %w", ErrNotFound)
 }
 
 // macOSCPUInfo retrieves CPU information.
@@ -201,7 +200,7 @@ func macOSCPUInfo(ctx context.Context, executor CommandExecutor, logger *slog.Lo
 		}
 	}
 
-	return "", errors.New("failed to get CPU info: all methods failed")
+	return "", fmt.Errorf("failed to get CPU info: %w", ErrAllMethodsFailed)
 }
 
 // macOSDiskInfo retrieves internal disk device names for stable machine identification.
@@ -221,7 +220,7 @@ func macOSDiskInfo(ctx context.Context, executor CommandExecutor, logger *slog.L
 func parseStorageJSON(jsonOutput string) ([]string, error) {
 	var storage spStorageDataType
 	if err := json.Unmarshal([]byte(jsonOutput), &storage); err != nil {
-		return nil, fmt.Errorf("failed to parse storage JSON: %w", err)
+		return nil, &ParseError{Source: "system_profiler storage JSON", Err: err}
 	}
 
 	// Use a set to deduplicate — multiple volumes can share the same physical disk.
@@ -248,7 +247,7 @@ func parseStorageJSON(jsonOutput string) ([]string, error) {
 	}
 
 	if len(diskNames) == 0 {
-		return nil, errors.New("no internal disk identifiers found")
+		return nil, fmt.Errorf("no internal disk identifiers found: %w", ErrNotFound)
 	}
 
 	return diskNames, nil
@@ -258,16 +257,16 @@ func parseStorageJSON(jsonOutput string) ([]string, error) {
 func extractHardwareField(jsonOutput string, fieldFn func(spHardwareEntry) string) (string, error) {
 	var hw spHardwareDataType
 	if err := json.Unmarshal([]byte(jsonOutput), &hw); err != nil {
-		return "", fmt.Errorf("failed to parse hardware JSON: %w", err)
+		return "", &ParseError{Source: "system_profiler hardware JSON", Err: err}
 	}
 
 	if len(hw.SPHardwareDataType) == 0 {
-		return "", errors.New("no hardware data found in JSON output")
+		return "", fmt.Errorf("no hardware data found in JSON output: %w", ErrNotFound)
 	}
 
 	value := fieldFn(hw.SPHardwareDataType[0])
 	if value == "" {
-		return "", errors.New("field is empty in hardware data")
+		return "", fmt.Errorf("field is empty in hardware data: %w", ErrEmptyValue)
 	}
 
 	return value, nil
