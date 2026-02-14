@@ -489,9 +489,38 @@ id, _ := machineid.New().
     ID()
 ```
 
+## Troubleshooting
+
+### Git Tag Push Error: "push declined due to repository rule violations"
+
+If you encounter this error when trying to push a tag:
+
+```
+! [remote rejected] v0.0.1 -> v0.0.1 (push declined due to repository rule violations)
+error: failed to push some refs to 'github.com:slashdevops/machineid.git'
+```
+
+**Cause**: This happens when you try to create a tag with a version number that is older than existing tags. GitHub repository rules enforce semantic versioning order to prevent version rollback.
+
+**Solution**: Create a tag with a version number higher than all existing tags.
+
+1. Check existing tags:
+   ```bash
+   git tag -l
+   ```
+
+2. Create the next appropriate version:
+   ```bash
+   # If the latest tag is v0.0.2, use v0.0.3 or higher
+   git tag -a "v0.0.3" -m "Release v0.0.3"
+   git push origin v0.0.3
+   ```
+
+For more information about versioning and releases, see [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Contributing
 
-Contributions are welcome. Please open an issue or submit a pull request.
+Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on how to contribute, including information about versioning, testing, and code style.
 
 ## License
 
