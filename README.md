@@ -21,6 +21,7 @@ A **zero-dependency** Go library that generates unique, deterministic machine id
 - **Thread-Safe** — safe for concurrent use after configuration
 - **Diagnostic API** — inspect which components succeeded or failed
 - **Optional Logging** — `*slog.Logger` support for observability with zero overhead when disabled
+- **Structured Errors** — sentinel errors and typed errors for programmatic handling via `errors.Is` / `errors.As`
 - **Testable** — dependency-injectable command executor
 
 ## Installation
@@ -262,6 +263,54 @@ The logger is compatible with `slog.Default()` which bridges to the standard `lo
 provider.WithLogger(slog.Default())
 ```
 
+### Error Handling
+
+The package provides sentinel errors for `errors.Is` and typed errors for `errors.As`:
+
+```go
+id, err := provider.ID(ctx)
+if errors.Is(err, machineid.ErrNoIdentifiers) {
+    // No hardware identifiers were collected
+}
+```
+
+#### Sentinel Errors
+
+| Error                 | Meaning                                                          |
+|-----------------------|------------------------------------------------------------------|
+| `ErrNoIdentifiers`    | No hardware identifiers collected with current config            |
+| `ErrEmptyValue`       | A component returned an empty value                              |
+| `ErrNoValues`         | A multi-value component (MAC, disk) returned no values           |
+| `ErrNotFound`         | A value was not found in command output or system files          |
+| `ErrOEMPlaceholder`   | A value matches a BIOS/UEFI placeholder ("To be filled...")      |
+| `ErrAllMethodsFailed` | All collection methods for a component were exhausted            |
+
+#### Typed Errors
+
+Use `errors.As` to extract structured context from errors:
+
+```go
+// Check if a system command failed
+var cmdErr *machineid.CommandError
+if errors.As(err, &cmdErr) {
+    fmt.Println("command:", cmdErr.Command) // e.g. "sysctl", "ioreg", "wmic"
+}
+
+// Check if output parsing failed
+var parseErr *machineid.ParseError
+if errors.As(err, &parseErr) {
+    fmt.Println("source:", parseErr.Source) // e.g. "system_profiler JSON"
+}
+
+// Inspect diagnostic errors per component
+diag := provider.Diagnostics()
+var compErr *machineid.ComponentError
+if errors.As(diag.Errors["cpu"], &compErr) {
+    fmt.Println("component:", compErr.Component)
+    fmt.Println("cause:", compErr.Err)
+}
+```
+
 ## CLI Tool
 
 A ready-to-use command-line tool is included.
@@ -286,6 +335,12 @@ machineid -cpu -uuid -json -diagnostics
 # Validate a previously stored ID
 machineid -cpu -uuid -validate "b5c42832542981af58c9dc3bc241219e780ff7d276cfad05fac222846edb84f7"
 
+# Info-level logging (fallbacks, lifecycle events)
+machineid -cpu -uuid -verbose
+
+# Debug-level logging (command details, raw values, timing)
+machineid -all -debug
+
 # Version information
 machineid -version
 machineid -version.long
@@ -293,22 +348,24 @@ machineid -version.long
 
 ### All Flags
 
-| Flag            | Description                                          |
-|-----------------|------------------------------------------------------|
-| `-cpu`          | Include CPU identifier                               |
-| `-motherboard`  | Include motherboard serial number                    |
-| `-uuid`         | Include system UUID                                  |
-| `-mac`          | Include network MAC addresses                        |
-| `-disk`         | Include disk serial numbers                          |
-| `-all`          | Include all hardware identifiers                     |
-| `-vm`           | VM-friendly mode (CPU + UUID only)                   |
-| `-format N`     | Output length: `32`, `64` (default), `128`, or `256` |
-| `-salt STRING`  | Custom salt for application-specific IDs             |
-| `-validate ID`  | Validate an ID against the current machine           |
-| `-diagnostics`  | Show collected/failed components                     |
-| `-json`         | Output as JSON                                       |
-| `-version`      | Show version information                             |
-| `-version.long` | Show detailed version information                    |
+| Flag            | Description                                                     |
+|-----------------|-----------------------------------------------------------------|
+| `-cpu`          | Include CPU identifier                                          |
+| `-motherboard`  | Include motherboard serial number                               |
+| `-uuid`         | Include system UUID                                             |
+| `-mac`          | Include network MAC addresses                                   |
+| `-disk`         | Include disk serial numbers                                     |
+| `-all`          | Include all hardware identifiers                                |
+| `-vm`           | VM-friendly mode (CPU + UUID only)                              |
+| `-format N`     | Output length: `32`, `64` (default), `128`, or `256`            |
+| `-salt STRING`  | Custom salt for application-specific IDs                        |
+| `-validate ID`  | Validate an ID against the current machine                      |
+| `-diagnostics`  | Show collected/failed components                                |
+| `-json`         | Output as JSON                                                  |
+| `-verbose`      | Enable info-level logging to stderr (fallbacks, lifecycle)      |
+| `-debug`        | Enable debug-level logging to stderr (commands, values, timing) |
+| `-version`      | Show version information                                        |
+| `-version.long` | Show detailed version information                               |
 
 ## How It Works
 

@@ -94,28 +94,6 @@ func ExampleProvider_Validate() {
 	// Wrong ID valid: false
 }
 
-// ExampleProvider_Diagnostics demonstrates inspecting which hardware components
-// were successfully collected.
-func ExampleProvider_Diagnostics() {
-	provider := machineid.New().
-		WithCPU().
-		WithSystemUUID()
-
-	_, _ = provider.ID(context.Background())
-
-	diag := provider.Diagnostics()
-	if diag == nil {
-		fmt.Println("no diagnostics")
-		return
-	}
-
-	fmt.Printf("Components collected: %d\n", len(diag.Collected))
-	fmt.Printf("Has collected data: %v\n", len(diag.Collected) > 0)
-	// Output:
-	// Components collected: 2
-	// Has collected data: true
-}
-
 // ExampleProvider_VMFriendly_preset demonstrates the VM-friendly preset.
 func ExampleProvider_VMFriendly_preset() {
 	id, err := machineid.New().

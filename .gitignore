@@ -31,6 +31,7 @@ go.work.sum
 # .idea/
 # .vscode/
 
+machineid
 .DS_Store
 build/
 dist/
