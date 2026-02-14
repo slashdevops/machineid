@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
 	"log/slog"
 	"runtime"
 	"sort"
@@ -192,7 +191,7 @@ func (p *Provider) ID(ctx context.Context) (string, error) {
 
 	identifiers, err := collectIdentifiers(ctx, p, diag)
 	if err != nil {
-		return "", fmt.Errorf("failed to collect hardware identifiers: %w", err)
+		return "", err
 	}
 
 	if len(identifiers) == 0 {

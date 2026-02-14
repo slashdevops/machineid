@@ -159,6 +159,8 @@
 //	machineid -cpu -uuid
 //	machineid -all -format 32 -json
 //	machineid -vm -salt "my-app" -diagnostics
+//	machineid -cpu -uuid -verbose
+//	machineid -all -debug
 //	machineid -version
 //	machineid -version.long
 package machineid

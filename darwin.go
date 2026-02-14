@@ -99,6 +99,10 @@ func macOSHardwareUUID(ctx context.Context, executor CommandExecutor, logger *sl
 		if parseErr == nil {
 			return uuid, nil
 		}
+
+		if logger != nil {
+			logger.Debug("system_profiler UUID parsing failed", "error", parseErr)
+		}
 	}
 
 	// Fallback to ioreg
@@ -113,7 +117,7 @@ func macOSHardwareUUID(ctx context.Context, executor CommandExecutor, logger *sl
 func macOSHardwareUUIDViaIOReg(ctx context.Context, executor CommandExecutor, logger *slog.Logger) (string, error) {
 	output, err := executeCommand(ctx, executor, logger, "ioreg", "-d2", "-c", "IOPlatformExpertDevice")
 	if err != nil {
-		return "", fmt.Errorf("failed to get hardware UUID: %w", err)
+		return "", err
 	}
 
 	match := ioregUUIDRe.FindStringSubmatch(output)
@@ -121,7 +125,11 @@ func macOSHardwareUUIDViaIOReg(ctx context.Context, executor CommandExecutor, lo
 		return match[1], nil
 	}
 
-	return "", fmt.Errorf("hardware UUID not found in ioreg output: %w", ErrNotFound)
+	if logger != nil {
+		logger.Debug("hardware UUID not found in ioreg output")
+	}
+
+	return "", &ParseError{Source: "ioreg output", Err: ErrNotFound}
 }
 
 // macOSSerialNumber retrieves system serial number.
@@ -133,6 +141,10 @@ func macOSSerialNumber(ctx context.Context, executor CommandExecutor, logger *sl
 		})
 		if parseErr == nil {
 			return serial, nil
+		}
+
+		if logger != nil {
+			logger.Debug("system_profiler serial parsing failed", "error", parseErr)
 		}
 	}
 
@@ -148,7 +160,7 @@ func macOSSerialNumber(ctx context.Context, executor CommandExecutor, logger *sl
 func macOSSerialNumberViaIOReg(ctx context.Context, executor CommandExecutor, logger *slog.Logger) (string, error) {
 	output, err := executeCommand(ctx, executor, logger, "ioreg", "-d2", "-c", "IOPlatformExpertDevice")
 	if err != nil {
-		return "", fmt.Errorf("failed to get serial number: %w", err)
+		return "", err
 	}
 
 	match := ioregSerialRe.FindStringSubmatch(output)
@@ -156,7 +168,11 @@ func macOSSerialNumberViaIOReg(ctx context.Context, executor CommandExecutor, lo
 		return match[1], nil
 	}
 
-	return "", fmt.Errorf("serial number not found in ioreg output: %w", ErrNotFound)
+	if logger != nil {
+		logger.Debug("serial number not found in ioreg output")
+	}
+
+	return "", &ParseError{Source: "ioreg output", Err: ErrNotFound}
 }
 
 // macOSCPUInfo retrieves CPU information.
@@ -197,10 +213,20 @@ func macOSCPUInfo(ctx context.Context, executor CommandExecutor, logger *slog.Lo
 			if entry.ChipType != "" {
 				return entry.ChipType, nil
 			}
+
+			if logger != nil {
+				logger.Debug("system_profiler returned empty chip_type")
+			}
+		} else if logger != nil {
+			logger.Debug("system_profiler CPU JSON parsing failed", "error", jsonErr)
 		}
 	}
 
-	return "", fmt.Errorf("failed to get CPU info: %w", ErrAllMethodsFailed)
+	if logger != nil {
+		logger.Warn("all CPU info methods failed")
+	}
+
+	return "", ErrAllMethodsFailed
 }
 
 // macOSDiskInfo retrieves internal disk device names for stable machine identification.
@@ -209,7 +235,7 @@ func macOSCPUInfo(ctx context.Context, executor CommandExecutor, logger *slog.Lo
 func macOSDiskInfo(ctx context.Context, executor CommandExecutor, logger *slog.Logger) ([]string, error) {
 	output, err := executeCommand(ctx, executor, logger, "system_profiler", "SPStorageDataType", "-json")
 	if err != nil {
-		return nil, fmt.Errorf("failed to get disk info: %w", err)
+		return nil, err
 	}
 
 	return parseStorageJSON(output)
@@ -247,7 +273,7 @@ func parseStorageJSON(jsonOutput string) ([]string, error) {
 	}
 
 	if len(diskNames) == 0 {
-		return nil, fmt.Errorf("no internal disk identifiers found: %w", ErrNotFound)
+		return nil, &ParseError{Source: "system_profiler storage output", Err: ErrNotFound}
 	}
 
 	return diskNames, nil
@@ -261,12 +287,12 @@ func extractHardwareField(jsonOutput string, fieldFn func(spHardwareEntry) strin
 	}
 
 	if len(hw.SPHardwareDataType) == 0 {
-		return "", fmt.Errorf("no hardware data found in JSON output: %w", ErrNotFound)
+		return "", &ParseError{Source: "system_profiler hardware JSON", Err: ErrNotFound}
 	}
 
 	value := fieldFn(hw.SPHardwareDataType[0])
 	if value == "" {
-		return "", fmt.Errorf("field is empty in hardware data: %w", ErrEmptyValue)
+		return "", &ParseError{Source: "system_profiler hardware JSON", Err: ErrEmptyValue}
 	}
 
 	return value, nil
