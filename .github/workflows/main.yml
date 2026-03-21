@@ -5,14 +5,18 @@ on:
     branches:
       - main
 
+env:
+  MAKE_DEBUG: true
+
 permissions:
   contents: read
 
 jobs:
   build:
+    name: Test & Build
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Check out code
         uses: actions/checkout@v6
 
       - name: Set up Go
@@ -82,39 +86,35 @@ jobs:
           mv $TOOL_NAME ~/go/bin/$TOOL_NAME
           ~/go/bin/$TOOL_NAME --version
 
-          # go install github.com/boyter/scc/v3@latest
-
           scc --format html-table . | tee -a $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
       - name: Test
         run: |
+          set -o pipefail
+
           echo "### Test report" >> $GITHUB_STEP_SUMMARY
 
-          go test -race -coverprofile=coverage.txt -covermode=atomic -tags=unit ./... | tee -a $GITHUB_STEP_SUMMARY
+          make test 2>&1 | tee -a $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
-      - name: Test coverage
+      - name: Test Coverage
         run: |
+          set -o pipefail
+
           echo "## Test Coverage" >> $GITHUB_STEP_SUMMARY
 
-          # Generate coverage report using standard library tools
+          go install github.com/vladopajic/go-test-coverage/v2@latest
+
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Coverage report" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          go tool cover -func=coverage.txt | tee -a $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          # Calculate total coverage percentage
-          total_coverage=$(go tool cover -func=coverage.txt | grep total | awk '{print $3}')
-          echo "**Total Coverage:** $total_coverage" >> $GITHUB_STEP_SUMMARY
+          go-test-coverage --config=./.testcoverage.yml | sed 's/PASS/PASS  ✅/g' | sed 's/FAIL/FAIL  ❌/g' | tee -a $GITHUB_STEP_SUMMARY
 
       - name: Build
         run: |
           echo "## Build" >> $GITHUB_STEP_SUMMARY
 
-          go build ./... | tee -a $GITHUB_STEP_SUMMARY
+          make build 2>&1 | tee -a $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "Build completed successfully." >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY

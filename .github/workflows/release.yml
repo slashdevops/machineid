@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 env:
-  MAKE_STOP_ON_ERRORS: true
+  MAKE_DEBUG: true
 
 permissions:
   id-token: write
@@ -24,14 +24,10 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v6
 
-      - name: Set up Go 1.x
-        id: go
+      - name: Set up Go
         uses: actions/setup-go@v6
         with:
           go-version-file: ./go.mod
-
-      - name: Go version
-        run: go version
 
       - name: Test
         run: make test
@@ -44,14 +40,10 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v6
 
-      - name: Set up Go 1.x
-        id: go
+      - name: Set up Go
         uses: actions/setup-go@v6
         with:
           go-version-file: ./go.mod
-
-      - name: Go version
-        run: go version
 
       - name: Build Linux distribution
         run: |
@@ -85,13 +77,10 @@ jobs:
   #     - name: Check out code
   #       uses: actions/checkout@v6
   #
-  #     - name: Set up Go 1.x
+  #     - name: Set up Go
   #       uses: actions/setup-go@v6
   #       with:
   #         go-version-file: ./go.mod
-  #
-  #     - name: Go version
-  #       run: go version
   #
   #     - name: Build Windows binaries (arm64 & amd64)
   #       shell: pwsh
@@ -183,13 +172,10 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v6
 
-      - name: Set up Go 1.x
+      - name: Set up Go
         uses: actions/setup-go@v6
         with:
           go-version-file: ./go.mod
-
-      - name: Go version
-        run: go version
 
       - name: Build macOS binaries (arm64 & amd64)
         run: |
@@ -303,14 +289,10 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v6
 
-      - name: Set up Go 1.x
-        id: go
+      - name: Set up Go
         uses: actions/setup-go@v6
         with:
           go-version-file: ./go.mod
-
-      - name: Go version
-        run: go version
 
       - name: Download Linux distribution files
         uses: actions/download-artifact@v7

@@ -5,15 +5,19 @@ on:
     branches:
       - main
 
+env:
+  MAKE_DEBUG: true
+
 permissions:
   contents: read
   pull-requests: read
 
 jobs:
   test:
+    name: Test
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Check out code
         uses: actions/checkout@v6
 
       - name: Set up Go
@@ -85,8 +89,6 @@ jobs:
           mv $TOOL_NAME ~/go/bin/$TOOL_NAME
           ~/go/bin/$TOOL_NAME --version
 
-          # go install github.com/boyter/scc/v3@latest
-
           scc --format html-table . | tee -a $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
@@ -96,7 +98,7 @@ jobs:
 
           echo "### Test report" >> $GITHUB_STEP_SUMMARY
 
-          make test | tee -a $GITHUB_STEP_SUMMARY
+          make test 2>&1 | tee -a $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
       - name: Test Coverage
@@ -107,7 +109,6 @@ jobs:
 
           go install github.com/vladopajic/go-test-coverage/v2@latest
 
-          # execute again to get the summary
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Coverage report" >> $GITHUB_STEP_SUMMARY
           go-test-coverage --config=./.testcoverage.yml | sed 's/PASS/PASS  ✅/g' | sed 's/FAIL/FAIL  ❌/g' | tee -a $GITHUB_STEP_SUMMARY
