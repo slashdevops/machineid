@@ -1,10 +1,13 @@
 name: Release
 
-# https://help.github.com/es/actions/reference/workflow-syntax-for-github-actions#filter-pattern-cheat-sheet
 on:
   push:
     tags:
       - v[0-9].[0-9]+.[0-9]*
+  workflow_dispatch:
+
+env:
+  MAKE_STOP_ON_ERRORS: true
 
 permissions:
   id-token: write
@@ -12,11 +15,10 @@ permissions:
   actions: write
   contents: write
   pull-requests: read
-  packages: write
 
 jobs:
-  release:
-    name: Release
+  test:
+    name: Test
     runs-on: ubuntu-latest
     steps:
       - name: Check out code
@@ -28,90 +30,316 @@ jobs:
         with:
           go-version-file: ./go.mod
 
-      - name: Summary Information
-        run: |
-          echo "# Build Summary" > $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Repository:** ${{ github.repository }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Who merge:** ${{ github.triggering_actor }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Commit ID:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-      - name: Lines of code
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          export TOOL_NAME="scc"
-          export GIT_ORG="boyter"
-          export GIT_REPO="scc"
-          export OS=$(uname -s)
-          export OS_ARCH=$(uname -m)
-          # Normalize architecture names to match asset naming
-          [[ "$OS_ARCH" == "aarch64" ]] && OS_ARCH="arm64"
-          [[ "$OS_ARCH" == "x86_64" ]] && OS_ARCH="x86_64"
-          export ASSETS_NAME=$(gh release view --repo ${GIT_ORG}/${GIT_REPO} --json assets -q "[.assets[] | select(.name | contains(\"${TOOL_NAME}\") and contains(\"${OS}\") and contains(\"${OS_ARCH}\"))] | sort_by(.createdAt) | last.name")
-
-          gh release download --repo $GIT_ORG/$GIT_REPO --pattern $ASSETS_NAME
-
-          # Extract based on file extension
-          if [[ "$ASSETS_NAME" == *.tar.gz ]]; then
-            tar -xzf $ASSETS_NAME
-          elif [[ "$ASSETS_NAME" == *.zip ]]; then
-            unzip $ASSETS_NAME
-          fi
-
-          rm $ASSETS_NAME
-
-          mv $TOOL_NAME ~/go/bin/$TOOL_NAME
-          ~/go/bin/$TOOL_NAME --version
-
-          # go install github.com/boyter/scc/v3@latest
-
-          scc --format html-table . | tee -a $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
+      - name: Go version
+        run: go version
 
       - name: Test
-        run: |
-          echo "### Test report" >> $GITHUB_STEP_SUMMARY
+        run: make test
 
-          go test -race -coverprofile=coverage.txt -covermode=atomic -tags=unit ./... | tee -a $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
+  build-linux:
+    name: Build Distribution (Linux)
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v6
 
-      - name: Test coverage
-        run: |
-          echo "## Test Coverage" >> $GITHUB_STEP_SUMMARY
-
-          # Generate coverage report using standard library tools
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Coverage report" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          go tool cover -func=coverage.txt | tee -a $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          # Calculate total coverage percentage
-          total_coverage=$(go tool cover -func=coverage.txt | grep total | awk '{print $3}')
-          echo "**Total Coverage:** $total_coverage" >> $GITHUB_STEP_SUMMARY
-
-      - name: make build-dist
-        run: |
-          echo "## make build-dist" >> $GITHUB_STEP_SUMMARY
-          GIT_VERSION=${{ github.ref_name }} make build-dist | tee -a $GITHUB_STEP_SUMMARY
-
-      - name: make build-dist-zip
-        run: |
-          echo "## make build-dist-zip" >> $GITHUB_STEP_SUMMARY
-          GIT_VERSION=${{ github.ref_name }} make build-dist-zip | tee -a $GITHUB_STEP_SUMMARY
-
-      - name: Upload Distribution files to release
-        uses: softprops/action-gh-release@v2
+      - name: Set up Go 1.x
+        id: go
+        uses: actions/setup-go@v6
         with:
-          tag_name: ${{ github.ref_name }}
-          files: |
-            dist/assets/*.zip
+          go-version-file: ./go.mod
 
-      - name: Release
+      - name: Go version
+        run: go version
+
+      - name: Build Linux distribution
+        run: |
+          GIT_VERSION=${{ github.ref_name }} GO_OS="linux" make build-dist
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign Linux binaries with Cosign (keyless)
+        run: |
+          for arch in arm64 amd64; do
+            for bin in machineid; do
+              cosign sign-blob \
+                --yes \
+                --bundle "./dist/${bin}-linux-${arch}.sigstore.json" \
+                "./dist/${bin}-linux-${arch}"
+            done
+          done
+
+      - name: Upload Linux distribution files
+        uses: actions/upload-artifact@v6
+        with:
+          name: dist-linux
+          path: ./dist/
+
+  # build-sign-windows:
+  #   name: Build & Sign Windows
+  #   needs: test
+  #   runs-on: windows-latest
+  #   steps:
+  #     - name: Check out code
+  #       uses: actions/checkout@v6
+  #
+  #     - name: Set up Go 1.x
+  #       uses: actions/setup-go@v6
+  #       with:
+  #         go-version-file: ./go.mod
+  #
+  #     - name: Go version
+  #       run: go version
+  #
+  #     - name: Build Windows binaries (arm64 & amd64)
+  #       shell: pwsh
+  #       run: |
+  #         $ErrorActionPreference = 'Stop'
+  #         $gitVersion   = "${{ github.ref_name }}"
+  #         $gitCommit    = (git rev-parse HEAD).Trim()
+  #         $gitBranch    = (git rev-parse --abbrev-ref HEAD).Trim()
+  #         $buildDate    = [System.DateTime]::UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ")
+  #         $gitUser      = (git config --get user.email).Trim()
+  #         $ns           = "github.com/slashdevops/machineid/internal/version"
+  #         $ldflags      = "-s -w " +
+  #           "-X `"${ns}.Version=${gitVersion}`" " +
+  #           "-X `"${ns}.BuildDate=${buildDate}`" " +
+  #           "-X `"${ns}.GitCommit=${gitCommit}`" " +
+  #           "-X `"${ns}.GitBranch=${gitBranch}`" " +
+  #           "-X `"${ns}.BuildUser=${gitUser}`"
+  #
+  #         New-Item -ItemType Directory -Force -Path ./dist | Out-Null
+  #         $env:CGO_ENABLED = "0"
+  #         $env:GOOS        = "windows"
+  #
+  #         foreach ($arch in @("arm64", "amd64")) {
+  #           $env:GOARCH = $arch
+  #           foreach ($bin in @("machineid")) {
+  #             Write-Host "Building ${bin}-windows-${arch}.exe"
+  #             go build -v -ldflags $ldflags -o "./dist/${bin}-windows-${arch}.exe" "./cmd/${bin}/"
+  #           }
+  #         }
+  #
+  #     - name: Azure Login
+  #       uses: azure/login@v2
+  #       with:
+  #         creds: ${{ secrets.AZURE_CREDENTIALS }}
+  #
+  #     - name: Install Azure Trusted Signing PowerShell module
+  #       shell: pwsh
+  #       run: |
+  #         Install-Module -Name TrustedSigning -RequiredVersion 0.4.1 -Force -Repository PSGallery
+  #         Get-Module -ListAvailable -Name TrustedSigning
+  #
+  #     - name: Sign Windows binaries
+  #       shell: pwsh
+  #       env:
+  #         AZURE_TRUSTED_SIGNING_ENDPOINT: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+  #         AZURE_TRUSTED_SIGNING_ACCOUNT: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT }}
+  #         AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE: ${{ secrets.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE }}
+  #       run: |
+  #         Invoke-TrustedSigning `
+  #           -Endpoint            $env:AZURE_TRUSTED_SIGNING_ENDPOINT `
+  #           -AccountName         $env:AZURE_TRUSTED_SIGNING_ACCOUNT `
+  #           -CertificateProfileName $env:AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE `
+  #           -FilesFolder         "./dist" `
+  #           -FilesFolderFilter   "*.exe" `
+  #           -FilesFolderRecurse  $false `
+  #           -FileDigest          SHA256 `
+  #           -TimestampRfc3161    "http://timestamp.acs.microsoft.com" `
+  #           -TimestampDigest     SHA256
+  #
+  #     - name: Generate checksums for signed Windows binaries
+  #       shell: pwsh
+  #       run: |
+  #         New-Item -ItemType Directory -Force -Path ./dist/assets | Out-Null
+  #         foreach ($arch in @("arm64", "amd64")) {
+  #           foreach ($bin in @("machineid")) {
+  #             $src  = "./dist/${bin}-windows-${arch}.exe"
+  #             $zip  = "./dist/assets/${bin}-windows-${arch}.zip"
+  #             $tmp  = "./dist/zip-${bin}-windows-${arch}"
+  #             New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+  #             Copy-Item $src -Destination "${tmp}/${bin}.exe"
+  #             Compress-Archive -Path "${tmp}/${bin}.exe" -DestinationPath $zip -Force
+  #             Remove-Item -Recurse -Force $tmp
+  #             $hash = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLower()
+  #             Set-Content -Path "./dist/assets/${bin}-windows-${arch}.sha256" -Value $hash
+  #           }
+  #         }
+  #
+  #     - name: Upload signed Windows artifacts
+  #       uses: actions/upload-artifact@v6
+  #       with:
+  #         name: dist-windows-signed
+  #         path: ./dist/assets/
+
+  build-sign-macos:
+    name: Build, Sign & Notarize macOS
+    needs: test
+    runs-on: macos-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v6
+
+      - name: Set up Go 1.x
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: ./go.mod
+
+      - name: Go version
+        run: go version
+
+      - name: Build macOS binaries (arm64 & amd64)
+        run: |
+          GIT_VERSION=${{ github.ref_name }} GO_OS="darwin" make build-dist
+
+      - name: Import Apple signing certificate
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+          KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain"
+
+          echo "$MACOS_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$RUNNER_TEMP/certificate.p12" \
+            -k "$KEYCHAIN_PATH" \
+            -P "$MACOS_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign \
+            -T /usr/bin/productsign
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+          security set-key-partition-list \
+            -S apple-tool:,apple: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+      - name: Create universal binaries with lipo
+        run: |
+          mkdir -p ./dist/macos
+          for bin in machineid; do
+            lipo -create \
+              "./dist/${bin}-darwin-arm64" \
+              "./dist/${bin}-darwin-amd64" \
+              -output "./dist/macos/${bin}"
+            chmod +x "./dist/macos/${bin}"
+          done
+
+      - name: Sign universal binaries
+        env:
+          MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+        run: |
+          for bin in machineid; do
+            codesign --force \
+              --options runtime \
+              --sign "$MACOS_SIGNING_IDENTITY" \
+              --timestamp \
+              "./dist/macos/${bin}"
+          done
+
+      - name: Verify binary signatures
+        run: |
+          for bin in machineid; do
+            codesign --verify --verbose=4 "./dist/macos/${bin}"
+          done
+
+      - name: Create, sign, notarize & staple .pkg installers
+        env:
+          MACOS_INSTALLER_SIGNING_IDENTITY: ${{ secrets.MACOS_INSTALLER_SIGNING_IDENTITY }}
+          MACOS_NOTARIZATION_APPLE_ID: ${{ secrets.MACOS_NOTARIZATION_APPLE_ID }}
+          MACOS_NOTARIZATION_PASSWORD: ${{ secrets.MACOS_NOTARIZATION_PASSWORD }}
+          MACOS_NOTARIZATION_TEAM_ID: ${{ secrets.MACOS_NOTARIZATION_TEAM_ID }}
+        run: |
+          for bin in machineid; do
+            pkg="./dist/assets/${bin}-darwin-universal.pkg"
+
+            echo "📦 Creating .pkg for ${bin}..."
+            PKG_APP_NAME="${bin}" GIT_VERSION=${{ github.ref_name }} make build-dist-pkg
+
+            echo "🔏 Signing ${bin} .pkg..."
+            productsign \
+              --sign "$MACOS_INSTALLER_SIGNING_IDENTITY" \
+              "${pkg}" \
+              "${pkg}.signed"
+            mv "${pkg}.signed" "${pkg}"
+
+            echo "📤 Notarizing ${bin} .pkg..."
+            xcrun notarytool submit \
+              "${pkg}" \
+              --apple-id "$MACOS_NOTARIZATION_APPLE_ID" \
+              --password "$MACOS_NOTARIZATION_PASSWORD" \
+              --team-id "$MACOS_NOTARIZATION_TEAM_ID" \
+              --wait
+
+            echo "📎 Stapling ${bin} .pkg..."
+            xcrun stapler staple "${pkg}"
+            xcrun stapler validate "${pkg}"
+
+            echo "🔢 Generating ${bin} .pkg checksum..."
+            shasum -a 256 "${pkg}" \
+              | cut -d ' ' -f 1 > "./dist/assets/${bin}-darwin-universal.sha256"
+          done
+
+      - name: Clean up keychain
+        if: always()
+        run: security delete-keychain "$RUNNER_TEMP/build.keychain" || true
+
+      - name: Upload macOS pkg artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: dist-macos
+          path: ./dist/assets/
+
+  create-github-release:
+    name: Create GitHub Release
+    # needs: [build-linux, build-sign-windows, build-sign-macos]
+    needs: [build-linux, build-sign-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v6
+
+      - name: Set up Go 1.x
+        id: go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: ./go.mod
+
+      - name: Go version
+        run: go version
+
+      - name: Download Linux distribution files
+        uses: actions/download-artifact@v7
+        with:
+          name: dist-linux
+          path: ./dist/
+
+      # - name: Download signed Windows artifacts
+      #   uses: actions/download-artifact@v7
+      #   with:
+      #     name: dist-windows-signed
+      #     path: ./dist/assets/
+
+      - name: Download macOS pkg
+        uses: actions/download-artifact@v7
+        with:
+          name: dist-macos
+          path: ./dist/assets/
+
+      - name: Zip Linux binaries
+        run: |
+          GIT_VERSION=${{ github.ref_name }} GO_OS="linux" make build-dist-zip
+
+      - name: Copy Linux Sigstore bundles to release assets
+        run: |
+          cp ./dist/*.sigstore.json ./dist/assets/
+
+      - name: Create GitHub Release
+        id: create-github-release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
@@ -119,4 +347,6 @@ jobs:
           draft: false
           prerelease: false
           generate_release_notes: true
-          make_latest: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+          files: |
+            dist/assets/**

@@ -198,19 +198,38 @@ build-dist: ## Build the application for all platforms defined in GO_OS and GO_A
 	)
 
 .PHONY: build-dist-zip
-build-dist-zip: ## Build the application for all platforms defined in GO_OS and GO_ARCH in this Makefile and create a zip file for each binary. Requires make build-dist
+build-dist-zip: ## Create zip files with clean binary names (no OS/arch suffix inside the zip). Requires make build-dist
 	@printf "👉 Creating zip files for distribution...\n"
 	$(call exec_cmd, mkdir -p $(DIST_ASSETS_DIR))
 	$(foreach GOOS, $(GO_OS), \
 		$(foreach GOARCH, $(GO_ARCH), \
 			$(foreach proj_mod, $(PROJECT_MODULES_NAME), \
-				$(call exec_cmd, cp $(DIST_DIR)/$(proj_mod)-$(GOOS)-$(GOARCH) $(DIST_DIR)/$(proj_mod) ) \
-				$(call exec_cmd, zip --junk-paths -r $(DIST_ASSETS_DIR)/$(proj_mod)-$(GOOS)-$(GOARCH).zip $(DIST_DIR)/$(proj_mod) ) \
-				$(call exec_cmd, rm $(DIST_DIR)/$(proj_mod) ) \
+				$(call exec_cmd, mkdir -p $(DIST_DIR)/zip-$(proj_mod)-$(GOOS)-$(GOARCH)) \
+				$(call exec_cmd, cp $(DIST_DIR)/$(proj_mod)-$(GOOS)-$(GOARCH) $(DIST_DIR)/zip-$(proj_mod)-$(GOOS)-$(GOARCH)/$(proj_mod)$(if $(filter windows,$(GOOS)),.exe,)) \
+				$(call exec_cmd, zip --junk-paths -r $(DIST_ASSETS_DIR)/$(proj_mod)-$(GOOS)-$(GOARCH).zip $(DIST_DIR)/zip-$(proj_mod)-$(GOOS)-$(GOARCH)/) \
+				$(call exec_cmd, rm -rf $(DIST_DIR)/zip-$(proj_mod)-$(GOOS)-$(GOARCH)) \
 				$(call exec_cmd, shasum -a 256 $(DIST_ASSETS_DIR)/$(proj_mod)-$(GOOS)-$(GOARCH).zip | cut -d ' ' -f 1 > $(DIST_ASSETS_DIR)/$(proj_mod)-$(GOOS)-$(GOARCH).sha256 ) \
 			) \
 		) \
 	)
+
+.PHONY: build-dist-pkg
+build-dist-pkg: ## Create a macOS universal .pkg installer for a single app. Requires PKG_APP_NAME and macOS. Usage: PKG_APP_NAME=machineid make build-dist-pkg
+ifndef PKG_APP_NAME
+	$(error PKG_APP_NAME is required. Usage: PKG_APP_NAME=machineid make build-dist-pkg)
+endif
+	@printf "👉 Creating macOS .pkg for $(PKG_APP_NAME)...\n"
+	$(call exec_cmd, mkdir -p $(DIST_ASSETS_DIR))
+	$(call exec_cmd, mkdir -p $(DIST_DIR)/macos-pkg-$(PKG_APP_NAME)/usr/local/bin)
+	$(call exec_cmd, cp $(DIST_DIR)/macos/$(PKG_APP_NAME) $(DIST_DIR)/macos-pkg-$(PKG_APP_NAME)/usr/local/bin/$(PKG_APP_NAME))
+	$(call exec_cmd, pkgbuild \
+		--root $(DIST_DIR)/macos-pkg-$(PKG_APP_NAME) \
+		--identifier "com.slashdevops.$(PKG_APP_NAME)" \
+		--version "$(GIT_VERSION)" \
+		--install-location "/" \
+		"$(DIST_ASSETS_DIR)/$(PKG_APP_NAME)-darwin-universal.pkg" \
+	)
+	$(call exec_cmd, shasum -a 256 $(DIST_ASSETS_DIR)/$(PKG_APP_NAME)-darwin-universal.pkg | cut -d ' ' -f 1 > $(DIST_ASSETS_DIR)/$(PKG_APP_NAME)-darwin-universal.sha256)
 
 ###############################################################################
 ##@ Check commands

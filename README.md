@@ -66,31 +66,32 @@ source ~/.zshrc
 
 #### Installing a Precompiled Binary
 
-Precompiled binaries for macOS, Linux, and Windows are available on the [releases page](https://github.com/slashdevops/machineid/releases).
+Signed and notarized binaries for macOS, Linux, and Windows are available on the [releases page](https://github.com/slashdevops/machineid/releases).
 
-You can download them with the [GitHub CLI](https://cli.github.com/manual/installation) (`gh`):
-
-```bash
-brew install gh   # if not already installed
-```
-
-Then fetch and install the binary:
+**macOS** (signed & notarized universal `.pkg` installer — arm64 + amd64):
 
 ```bash
-export TOOL_NAME="machineid"
-export GIT_ORG="slashdevops"
-export GIT_REPO="machineid"
-export OS=$(uname -s | tr '[:upper:]' '[:lower:]')
-export OS_ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')
-export ASSETS_NAME=$(gh release view --repo ${GIT_ORG}/${GIT_REPO} --json assets -q "[.assets[] | select(.name | contains(\"${TOOL_NAME}\") and contains(\"${OS}\") and contains(\"${OS_ARCH}\"))] | sort_by(.createdAt) | last.name")
-
-gh release download --repo $GIT_ORG/$GIT_REPO --pattern $ASSETS_NAME
-unzip $ASSETS_NAME
-rm $ASSETS_NAME
-
-mv $TOOL_NAME ~/go/bin/$TOOL_NAME
-~/go/bin/$TOOL_NAME -version
+curl -L https://github.com/slashdevops/machineid/releases/latest/download/machineid-darwin-universal.pkg -o machineid.pkg
+sudo installer -pkg machineid.pkg -target /
 ```
+
+Or double-click the `.pkg` file in Finder to use the graphical installer.
+
+**Linux**:
+
+```bash
+curl -L https://github.com/slashdevops/machineid/releases/latest/download/machineid-linux-amd64.zip -o machineid.zip
+unzip machineid.zip && sudo mv machineid /usr/local/bin/
+```
+
+**Windows** (via PowerShell):
+
+```powershell
+Invoke-WebRequest -Uri https://github.com/slashdevops/machineid/releases/latest/download/machineid-windows-amd64.zip -OutFile machineid.zip
+Expand-Archive machineid.zip -DestinationPath $env:USERPROFILE\bin
+```
+
+See [docs/macos-signing.md](docs/macos-signing.md) and [docs/linux-signing.md](docs/linux-signing.md) for details on binary verification.
 
 #### Building from Source
 
