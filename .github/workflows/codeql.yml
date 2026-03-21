@@ -8,6 +8,11 @@ on:
   schedule:
     - cron: "08 12 * * 4"
 
+env:
+  # Opt in to the new CodeQL default: skip file coverage on PRs for faster analysis.
+  # Coverage is still computed on push and schedule analyses.
+  CODEQL_ACTION_FILE_COVERAGE_ON_PRS: false
+
 jobs:
   analyze:
     name: Analyze (${{ matrix.language }})
