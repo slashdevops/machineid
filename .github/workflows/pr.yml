@@ -92,23 +92,22 @@ jobs:
 
       - name: Test
         run: |
+          set -o pipefail
+
           echo "### Test report" >> $GITHUB_STEP_SUMMARY
 
           make test | tee -a $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
-      - name: Test coverage
+      - name: Test Coverage
         run: |
+          set -o pipefail
+
           echo "## Test Coverage" >> $GITHUB_STEP_SUMMARY
 
-          # Generate coverage report using standard library tools
+          go install github.com/vladopajic/go-test-coverage/v2@latest
+
+          # execute again to get the summary
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Coverage report" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          go tool cover -func=coverage.txt | tee -a $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          # Calculate total coverage percentage
-          total_coverage=$(go tool cover -func=coverage.txt | grep total | awk '{print $3}')
-          echo "**Total Coverage:** $total_coverage" >> $GITHUB_STEP_SUMMARY
+          go-test-coverage --config=./.testcoverage.yml | sed 's/PASS/PASS  ✅/g' | sed 's/FAIL/FAIL  ❌/g' | tee -a $GITHUB_STEP_SUMMARY
