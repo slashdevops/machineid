@@ -3,12 +3,15 @@ package machineid
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 )
 
 // mockExecutor is a test double that implements CommandExecutor for testing.
+// It is safe for concurrent use (required by Windows concurrent collection).
 type mockExecutor struct {
+	mu sync.RWMutex
 	// outputs maps command name to expected output
 	outputs map[string]string
 	// errors maps command name to expected error
@@ -28,7 +31,12 @@ func newMockExecutor() *mockExecutor {
 
 // Execute implements CommandExecutor interface.
 func (m *mockExecutor) Execute(ctx context.Context, name string, args ...string) (string, error) {
+	m.mu.Lock()
 	m.callCount[name]++
+	m.mu.Unlock()
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 
 	if err, exists := m.errors[name]; exists {
 		return "", err
@@ -43,11 +51,15 @@ func (m *mockExecutor) Execute(ctx context.Context, name string, args ...string)
 
 // setOutput configures the mock to return the given output for a command.
 func (m *mockExecutor) setOutput(command, output string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.outputs[command] = output
 }
 
 // setError configures the mock to return an error for a command.
 func (m *mockExecutor) setError(command string, err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.errors[command] = err
 }
 
