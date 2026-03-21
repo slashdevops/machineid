@@ -10,7 +10,7 @@ permissions:
   pull-requests: read
 
 jobs:
-  build:
+  test:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -94,7 +94,7 @@ jobs:
         run: |
           echo "### Test report" >> $GITHUB_STEP_SUMMARY
 
-          go test -race -coverprofile=coverage.txt -covermode=atomic -tags=unit ./... | tee -a $GITHUB_STEP_SUMMARY
+          make test | tee -a $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
       - name: Test coverage
