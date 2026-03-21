@@ -72,7 +72,9 @@ type DiagnosticInfo struct {
 	Collected []string         // Component names that were successfully collected
 }
 
-// CommandExecutor is an interface for executing system commands, allowing for dependency injection and testing.
+// CommandExecutor is an interface for executing system commands, allowing for
+// dependency injection and testing. Implementations must be safe for concurrent
+// use, since Windows collects hardware identifiers in parallel goroutines.
 type CommandExecutor interface {
 	Execute(ctx context.Context, name string, args ...string) (string, error)
 }

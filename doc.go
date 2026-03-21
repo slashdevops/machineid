@@ -147,7 +147,9 @@
 // # Testing
 //
 // Inject a custom [CommandExecutor] via [Provider.WithExecutor] to replace
-// real system commands with deterministic test doubles:
+// real system commands with deterministic test doubles. Custom executors
+// must be safe for concurrent use, since Windows collects hardware
+// identifiers in parallel goroutines.
 //
 //	provider := machineid.New().
 //		WithExecutor(myMock).

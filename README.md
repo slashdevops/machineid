@@ -426,16 +426,20 @@ The library supports dependency injection for deterministic testing without real
 
 ```go
 type mockExecutor struct {
+    mu      sync.RWMutex
     outputs map[string]string
 }
 
 func (m *mockExecutor) Execute(ctx context.Context, name string, args ...string) (string, error) {
+    m.mu.RLock()
+    defer m.mu.RUnlock()
     if output, ok := m.outputs[name]; ok {
         return output, nil
     }
     return "", fmt.Errorf("command not found: %s", name)
 }
 
+ctx := context.Background()
 provider := machineid.New().
     WithExecutor(&mockExecutor{
         outputs: map[string]string{
@@ -444,8 +448,10 @@ provider := machineid.New().
     }).
     WithCPU()
 
-id, err := provider.ID()
+id, err := provider.ID(ctx)
 ```
+
+> **Note**: Custom executors must be safe for concurrent use since Windows collects hardware identifiers in parallel goroutines.
 
 Run the test suite:
 
@@ -474,24 +480,26 @@ go test -v -race ./...
 ### Hardware Identifier Selection
 
 ```go
+ctx := context.Background()
+
 // Minimal (VMs, containers)
-id, _ := machineid.New().VMFriendly().ID()
+id, _ := machineid.New().VMFriendly().ID(ctx)
 
 // Balanced (recommended)
-id, _ := machineid.New().
+id, _ = machineid.New().
     WithCPU().
     WithSystemUUID().
     WithMotherboard().
-    ID()
+    ID(ctx)
 
 // Maximum (most unique, but sensitive to hardware changes)
-id, _ := machineid.New().
+id, _ = machineid.New().
     WithCPU().
     WithSystemUUID().
     WithMotherboard().
     WithMAC().
     WithDisk().
-    ID()
+    ID(ctx)
 ```
 
 ## Troubleshooting
