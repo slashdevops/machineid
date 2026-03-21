@@ -213,8 +213,10 @@ build-dist-zip: ## Create zip files with clean binary names (no OS/arch suffix i
 		) \
 	)
 
+INSTALLER_DIR := ./installer/macos
+
 .PHONY: build-dist-pkg
-build-dist-pkg: ## Create a macOS universal .pkg installer for a single app. Requires PKG_APP_NAME and macOS. Usage: PKG_APP_NAME=machineid make build-dist-pkg
+build-dist-pkg: ## Create a macOS universal .pkg installer with license and readme. Requires PKG_APP_NAME and macOS. Usage: PKG_APP_NAME=machineid make build-dist-pkg
 ifndef PKG_APP_NAME
 	$(error PKG_APP_NAME is required. Usage: PKG_APP_NAME=machineid make build-dist-pkg)
 endif
@@ -227,8 +229,15 @@ endif
 		--identifier "com.slashdevops.$(PKG_APP_NAME)" \
 		--version "$(GIT_VERSION)" \
 		--install-location "/" \
+		"$(DIST_DIR)/$(PKG_APP_NAME)-component.pkg" \
+	)
+	$(call exec_cmd, productbuild \
+		--distribution $(INSTALLER_DIR)/$(PKG_APP_NAME)/distribution.xml \
+		--resources $(INSTALLER_DIR)/$(PKG_APP_NAME)/resources \
+		--package-path $(DIST_DIR) \
 		"$(DIST_ASSETS_DIR)/$(PKG_APP_NAME)-darwin-universal.pkg" \
 	)
+	$(call exec_cmd, rm -f $(DIST_DIR)/$(PKG_APP_NAME)-component.pkg)
 	$(call exec_cmd, shasum -a 256 $(DIST_ASSETS_DIR)/$(PKG_APP_NAME)-darwin-universal.pkg | cut -d ' ' -f 1 > $(DIST_ASSETS_DIR)/$(PKG_APP_NAME)-darwin-universal.sha256)
 
 ###############################################################################
