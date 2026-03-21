@@ -6,7 +6,7 @@ Thank you for your interest in contributing to machineid! This document provides
 
 ### Prerequisites
 
-- Go 1.22 or higher
+- Go 1.26 or higher
 - Git
 - Make
 

@@ -34,7 +34,7 @@ Add the module to your Go project:
 go get github.com/slashdevops/machineid
 ```
 
-Requires **Go 1.25+**. No external dependencies.
+Requires **Go 1.26+**. No external dependencies.
 
 ### CLI Tool
 
