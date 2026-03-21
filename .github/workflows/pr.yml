@@ -29,6 +29,49 @@ jobs:
       - name: Test
         run: go test -v -race -tags=unit ./...
 
+      - name: Build CLI
+        run: go build -v -o ${{ runner.temp }}/machineid${{ matrix.os == 'windows-latest' && '.exe' || '' }} ./cmd/machineid/
+
+      - name: Generate machine ID (smoke test)
+        shell: bash
+        run: |
+          BIN="${{ runner.temp }}/machineid${{ matrix.os == 'windows-latest' && '.exe' || '' }}"
+
+          echo "--- Version ---"
+          "$BIN" -version
+
+          echo "--- Default ID (CPU + motherboard + UUID) ---"
+          ID=$("$BIN")
+          echo "ID: $ID"
+          echo "Length: ${#ID}"
+
+          # Verify the ID is a 64-char hex string
+          if [[ ${#ID} -ne 64 ]]; then
+            echo "ERROR: expected 64-char ID, got ${#ID}"
+            exit 1
+          fi
+          if [[ ! "$ID" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "ERROR: ID is not a valid hex string"
+            exit 1
+          fi
+
+          echo "--- All components ---"
+          "$BIN" -all -json -diagnostics
+
+          echo "--- VM-friendly ---"
+          "$BIN" -vm
+
+          echo "--- Validate ---"
+          "$BIN" -validate "$ID"
+
+          echo "--- Format 32 ---"
+          "$BIN" -format 32
+
+          echo "--- Salt ---"
+          "$BIN" -salt "ci-test"
+
+          echo "Smoke test passed on ${{ matrix.os }}"
+
   report:
     name: Report
     needs: test
