@@ -6,6 +6,7 @@
     "CPUID",
     "csproduct",
     "diskdrive",
+    "elif",
     "Errorf",
     "golangci",
     "govulncheck",
