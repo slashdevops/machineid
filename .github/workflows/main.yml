@@ -5,16 +5,35 @@ on:
     branches:
       - main
 
-env:
-  MAKE_DEBUG: true
-
 permissions:
   contents: read
 
 jobs:
-  build:
-    name: Test & Build
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: ./go.mod
+
+      - name: Test
+        run: go test -v -race -tags=unit ./...
+
+  report:
+    name: Report & Build
+    needs: test
     runs-on: ubuntu-latest
+    env:
+      MAKE_DEBUG: true
     steps:
       - name: Check out code
         uses: actions/checkout@v6
@@ -89,20 +108,14 @@ jobs:
           scc --format html-table . | tee -a $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
-      - name: Test
-        run: |
-          set -o pipefail
-
-          echo "### Test report" >> $GITHUB_STEP_SUMMARY
-
-          make test 2>&1 | tee -a $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
       - name: Test Coverage
         run: |
           set -o pipefail
 
           echo "## Test Coverage" >> $GITHUB_STEP_SUMMARY
+
+          make test 2>&1 | tee -a $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
 
           go install github.com/vladopajic/go-test-coverage/v2@latest
 
