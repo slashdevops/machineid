@@ -1,4 +1,4 @@
-//go:build darwin
+//go:build linux
 
 package machineid_test
 
@@ -10,7 +10,7 @@ import (
 )
 
 // ExampleProvider_Diagnostics demonstrates inspecting which hardware components
-// were successfully collected.
+// were successfully collected on Linux.
 func ExampleProvider_Diagnostics() {
 	provider := machineid.New().
 		WithCPU().
@@ -34,7 +34,6 @@ func ExampleProvider_Diagnostics() {
 
 // Example_integrity demonstrates that the format maintains integrity without collisions.
 func Example_integrity() {
-	// Generate multiple IDs to show consistency and uniqueness
 	p1 := machineid.New().WithCPU().WithSystemUUID()
 	p2 := machineid.New().WithCPU().WithSystemUUID().WithMotherboard()
 	p3 := machineid.New().WithCPU().WithSystemUUID().WithSalt("app1")
@@ -62,4 +61,31 @@ func Example_integrity() {
 	// Different hardware: true
 	// Different salts: true
 	// All are 64 chars: true
+}
+
+// Example_linuxFileSources shows that Linux reads hardware data from
+// filesystem paths rather than spawning external commands.
+func Example_linuxFileSources() {
+	// On Linux, most hardware identifiers are read directly from /proc and /sys:
+	//   CPU:         /proc/cpuinfo
+	//   UUID:        /sys/class/dmi/id/product_uuid
+	//   Machine ID:  /etc/machine-id
+	//   Motherboard: /sys/class/dmi/id/board_serial
+	//   Disk:        lsblk + /sys/block/*/device/serial
+	//
+	// File reads are fast — no process startup overhead.
+	provider := machineid.New().
+		WithCPU().
+		WithSystemUUID().
+		WithDisk()
+
+	id, err := provider.ID(context.Background())
+	if err != nil {
+		fmt.Printf("error: %v\n", err)
+		return
+	}
+
+	fmt.Printf("ID length: %d\n", len(id))
+	// Output:
+	// ID length: 64
 }

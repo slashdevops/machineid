@@ -28,17 +28,17 @@ func ExampleNew() {
 func ExampleProvider_WithSalt() {
 	ctx := context.Background()
 
-	id1, _ := machineid.New().
-		WithCPU().
-		WithSystemUUID().
-		WithSalt("app-one").
-		ID(ctx)
+	id1, _ := machineid.New(). //nolint:errcheck // Example
+					WithCPU().
+					WithSystemUUID().
+					WithSalt("app-one").
+					ID(ctx)
 
-	id2, _ := machineid.New().
-		WithCPU().
-		WithSystemUUID().
-		WithSalt("app-two").
-		ID(ctx)
+	id2, _ := machineid.New(). //nolint:errcheck // Example
+					WithCPU().
+					WithSystemUUID().
+					WithSalt("app-two").
+					ID(ctx)
 
 	fmt.Printf("Same length: %v\n", len(id1) == len(id2))
 	fmt.Printf("Different IDs: %v\n", id1 != id2)
@@ -79,14 +79,14 @@ func ExampleProvider_Validate() {
 		WithCPU().
 		WithSystemUUID()
 
-	id, _ := provider.ID(context.Background())
+	id, _ := provider.ID(context.Background()) //nolint:errcheck // Example
 
 	// Validate the correct ID
-	valid, _ := provider.Validate(context.Background(), id)
+	valid, _ := provider.Validate(context.Background(), id) //nolint:errcheck // Example
 	fmt.Printf("Correct ID valid: %v\n", valid)
 
 	// Validate an incorrect ID
-	valid, _ = provider.Validate(context.Background(), "0000000000000000000000000000000000000000000000000000000000000000")
+	valid, _ = provider.Validate(context.Background(), "0000000000000000000000000000000000000000000000000000000000000000") //nolint:errcheck // Example
 	fmt.Printf("Wrong ID valid: %v\n", valid)
 
 	// Output:
@@ -134,7 +134,7 @@ func ExampleProvider_ID_allComponents() {
 
 func isAllHex(s string) bool {
 	for _, c := range s {
-		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
 			return false
 		}
 	}

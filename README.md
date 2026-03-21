@@ -66,31 +66,32 @@ source ~/.zshrc
 
 #### Installing a Precompiled Binary
 
-Precompiled binaries for macOS, Linux, and Windows are available on the [releases page](https://github.com/slashdevops/machineid/releases).
+Signed and notarized binaries for macOS, Linux, and Windows are available on the [releases page](https://github.com/slashdevops/machineid/releases).
 
-You can download them with the [GitHub CLI](https://cli.github.com/manual/installation) (`gh`):
-
-```bash
-brew install gh   # if not already installed
-```
-
-Then fetch and install the binary:
+**macOS** (signed & notarized universal `.pkg` installer — arm64 + amd64):
 
 ```bash
-export TOOL_NAME="machineid"
-export GIT_ORG="slashdevops"
-export GIT_REPO="machineid"
-export OS=$(uname -s | tr '[:upper:]' '[:lower:]')
-export OS_ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')
-export ASSETS_NAME=$(gh release view --repo ${GIT_ORG}/${GIT_REPO} --json assets -q "[.assets[] | select(.name | contains(\"${TOOL_NAME}\") and contains(\"${OS}\") and contains(\"${OS_ARCH}\"))] | sort_by(.createdAt) | last.name")
-
-gh release download --repo $GIT_ORG/$GIT_REPO --pattern $ASSETS_NAME
-unzip $ASSETS_NAME
-rm $ASSETS_NAME
-
-mv $TOOL_NAME ~/go/bin/$TOOL_NAME
-~/go/bin/$TOOL_NAME -version
+curl -L https://github.com/slashdevops/machineid/releases/latest/download/machineid-darwin-universal.pkg -o machineid.pkg
+sudo installer -pkg machineid.pkg -target /
 ```
+
+Or double-click the `.pkg` file in Finder to use the graphical installer.
+
+**Linux**:
+
+```bash
+curl -L https://github.com/slashdevops/machineid/releases/latest/download/machineid-linux-amd64.zip -o machineid.zip
+unzip machineid.zip && sudo mv machineid /usr/local/bin/
+```
+
+**Windows** (via PowerShell):
+
+```powershell
+Invoke-WebRequest -Uri https://github.com/slashdevops/machineid/releases/latest/download/machineid-windows-amd64.zip -OutFile machineid.zip
+Expand-Archive machineid.zip -DestinationPath $env:USERPROFILE\bin
+```
+
+See [docs/macos-signing.md](docs/macos-signing.md) and [docs/linux-signing.md](docs/linux-signing.md) for details on binary verification.
 
 #### Building from Source
 
@@ -344,7 +345,10 @@ See the [Installation](#installation) section above for all ways to install the 
 ### Examples
 
 ```bash
-# Generate an ID from CPU + UUID (default 64 chars)
+# Default: CPU + motherboard + UUID (64 hex chars)
+machineid
+
+# Specific components
 machineid -cpu -uuid
 
 # All hardware sources, compact 32-char format
@@ -354,49 +358,48 @@ machineid -all -format 32
 machineid -vm -salt "my-app"
 
 # JSON output with diagnostics
-machineid -cpu -uuid -json -diagnostics
+machineid -all -json -diagnostics
 
 # Validate a previously stored ID
 machineid -cpu -uuid -validate "b5c42832542981af58c9dc3bc241219e780ff7d276cfad05fac222846edb84f7"
 
-# Info-level logging (fallbacks, lifecycle events)
-machineid -cpu -uuid -verbose
-
-# Include only physical MACs (default)
-machineid -mac -mac-filter physical
-
 # Include all MACs (physical + virtual)
-machineid -all -mac-filter all
+machineid -mac -mac-filter all
+
+# Info-level logging (fallbacks, lifecycle events)
+machineid -all -verbose
 
 # Debug-level logging (command details, raw values, timing)
 machineid -all -debug
 
 # Version information
 machineid -version
-machineid -version.long
+machineid -version-long
 ```
 
 ### All Flags
 
-| Flag            | Description                                                     |
-|-----------------|-----------------------------------------------------------------|
-| `-cpu`          | Include CPU identifier                                          |
-| `-motherboard`  | Include motherboard serial number                               |
-| `-uuid`         | Include system UUID                                             |
-| `-mac`          | Include network MAC addresses                                   |
-| `-mac-filter F` | MAC filter: `physical` (default), `all`, or `virtual`           |
-| `-disk`         | Include disk serial numbers                                     |
-| `-all`          | Include all hardware identifiers                                |
-| `-vm`           | VM-friendly mode (CPU + UUID only)                              |
-| `-format N`     | Output length: `32`, `64` (default), `128`, or `256`            |
-| `-salt STRING`  | Custom salt for application-specific IDs                        |
-| `-validate ID`  | Validate an ID against the current machine                      |
-| `-diagnostics`  | Show collected/failed components                                |
-| `-json`         | Output as JSON                                                  |
-| `-verbose`      | Enable info-level logging to stderr (fallbacks, lifecycle)      |
-| `-debug`        | Enable debug-level logging to stderr (commands, values, timing) |
-| `-version`      | Show version information                                        |
-| `-version.long` | Show detailed version information                               |
+| Flag             | Description                                                         |
+|------------------|---------------------------------------------------------------------|
+| `-cpu`           | Include CPU identifier                                              |
+| `-motherboard`   | Include motherboard serial number                                   |
+| `-uuid`          | Include system UUID (BIOS/UEFI)                                     |
+| `-mac`           | Include network interface MAC addresses                             |
+| `-mac-filter F`  | MAC filter: `physical` (default), `all`, or `virtual`               |
+| `-disk`          | Include disk serial numbers                                         |
+| `-all`           | Include all hardware identifiers (CPU, motherboard, UUID, MAC, disk)|
+| `-vm`            | VM-friendly mode: CPU + UUID only                                   |
+| `-format N`      | Output length: `32`, `64` (default), `128`, or `256` hex chars      |
+| `-salt STRING`   | Application-specific salt for unique IDs per app                    |
+| `-validate ID`   | Check a stored ID against the current machine                       |
+| `-diagnostics`   | Show which hardware components were collected or failed             |
+| `-json`          | Format output as JSON                                               |
+| `-verbose`       | Info-level logs to stderr (fallbacks, lifecycle)                    |
+| `-debug`         | Debug-level logs to stderr (commands, values, timing)               |
+| `-version`       | Print version and exit                                              |
+| `-version-long`  | Print detailed build information and exit                           |
+
+When no component flags are specified, the default is `-cpu -motherboard -uuid`.
 
 ## How It Works
 
@@ -414,6 +417,8 @@ machineid -version.long
 | **Windows** | `wmic`, `PowerShell` | `wmic`, `PowerShell` | `wmic`, `PowerShell` | `wmic`, `PowerShell` | `net.Interfaces` |
 
 Each source has fallback methods for resilience across OS versions and configurations.
+
+> **Performance note**: On Windows, all hardware queries run **concurrently** using goroutines. This reduces total latency from the sum of all `wmic`/PowerShell calls (which are slow due to process startup overhead) to the maximum of any single call — typically cutting ID generation time from ~8-12s to ~2-3s.
 
 ## Testing
 
@@ -505,11 +510,13 @@ error: failed to push some refs to 'github.com:slashdevops/machineid.git'
 **Solution**: Create a tag with a version number higher than all existing tags.
 
 1. Check existing tags:
+
    ```bash
    git tag -l
    ```
 
 2. Create the next appropriate version:
+
    ```bash
    # If the latest tag is v0.0.2, use v0.0.3 or higher
    git tag -a "v0.0.3" -m "Release v0.0.3"

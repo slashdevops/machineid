@@ -49,3 +49,15 @@ Since this is a library build in native go, the files are mostly organized follo
 - Document all exported functions, types, and variables with clear and concise comments.
 - Use examples in the documentation to illustrate how to use the library effectively.
 - Keep documentation up to date with code changes. The package documentation located at `doc.go` should provide an overview of the package and its main functionalities. and the Public documentation at `README.md` should provide an overview of the project, installation instructions, usage examples, and other relevant information.
+
+## Post-Change Checklist
+
+Prefer the Make targets that the repo already defines after making changes:
+
+```bash
+make go-fmt             # Format code
+make go-betteralign     # Align struct fields for optimal memory layout
+golangci-lint run ./... # Run linter (also checks formatting, vet, and other issues)
+make build               # Verify build
+make test                # Run tests
+```

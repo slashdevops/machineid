@@ -31,7 +31,8 @@ go.work.sum
 # .idea/
 # .vscode/
 
-machineid
+# Ignore the compiled binary at the root, not the installer/macos/machineid/ directory
+/machineid
 .DS_Store
 build/
 dist/

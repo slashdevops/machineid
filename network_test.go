@@ -34,9 +34,18 @@ func TestCollectMACAddressesAllFilter(t *testing.T) {
 
 // TestCollectMACAddressesVirtualFilter tests that virtual filter excludes physical interfaces.
 func TestCollectMACAddressesVirtualFilter(t *testing.T) {
-	physical, _ := collectMACAddresses(MACFilterPhysical, nil)
-	virtual, _ := collectMACAddresses(MACFilterVirtual, nil)
-	all, _ := collectMACAddresses(MACFilterAll, nil)
+	physical, err := collectMACAddresses(MACFilterPhysical, nil)
+	if err != nil {
+		t.Logf("physical filter error: %v", err)
+	}
+	virtual, err := collectMACAddresses(MACFilterVirtual, nil)
+	if err != nil {
+		t.Logf("virtual filter error: %v", err)
+	}
+	all, err := collectMACAddresses(MACFilterAll, nil)
+	if err != nil {
+		t.Logf("all filter error: %v", err)
+	}
 
 	// Virtual + physical should equal all (no overlap since classification is binary)
 	if len(virtual)+len(physical) != len(all) {

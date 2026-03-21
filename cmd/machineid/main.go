@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"runtime"
 	"runtime/debug"
 	"strings"
 
@@ -20,99 +21,49 @@ func main() {
 	// Hardware component flags
 	cpu := flag.Bool("cpu", false, "Include CPU identifier")
 	motherboard := flag.Bool("motherboard", false, "Include motherboard serial number")
-	uuid := flag.Bool("uuid", false, "Include system UUID")
-	mac := flag.Bool("mac", false, "Include network MAC addresses")
-	macFilterFlag := flag.String("mac-filter", "physical", "MAC filter: physical, all, virtual")
+	uuid := flag.Bool("uuid", false, "Include system UUID (BIOS/UEFI)")
+	mac := flag.Bool("mac", false, "Include network interface MAC addresses")
+	macFilterFlag := flag.String("mac-filter", "physical", "MAC address filter: physical, all, or virtual (requires -mac or -all)")
 	disk := flag.Bool("disk", false, "Include disk serial numbers")
-	all := flag.Bool("all", false, "Include all hardware identifiers")
-	vm := flag.Bool("vm", false, "Use VM-friendly mode (CPU + UUID only)")
+	all := flag.Bool("all", false, "Include all hardware identifiers (CPU, motherboard, UUID, MAC, disk)")
+	vm := flag.Bool("vm", false, "VM-friendly mode: use only CPU + UUID (ignores other component flags)")
 
 	// Output options
-	format := flag.Int("format", 64, "Output format length: 32, 64, 128, or 256 characters")
-	salt := flag.String("salt", "", "Custom salt for application-specific IDs")
+	format := flag.Int("format", 64, "Output length in hex characters: 32, 64, 128, or 256")
+	salt := flag.String("salt", "", "Application-specific salt to produce unique IDs per app")
 
 	// Actions
-	validate := flag.String("validate", "", "Validate a machine ID against the current machine")
-	diagnostics := flag.Bool("diagnostics", false, "Show diagnostic information about collected components")
-	jsonOutput := flag.Bool("json", false, "Output result as JSON")
+	validate := flag.String("validate", "", "Validate a previously stored ID against this machine")
+	diagnostics := flag.Bool("diagnostics", false, "Show which hardware components were collected or failed")
+	jsonOutput := flag.Bool("json", false, "Format output as JSON")
 
 	// Logging flags
-	verbose := flag.Bool("verbose", false, "Enable info-level logging to stderr (fallbacks, lifecycle)")
-	debugFlag := flag.Bool("debug", false, "Enable debug-level logging to stderr (command details, raw values, timing)")
+	verbose := flag.Bool("verbose", false, "Log info-level messages to stderr (fallbacks, lifecycle events)")
+	debugFlag := flag.Bool("debug", false, "Log debug-level messages to stderr (commands, raw values, timing)")
 
 	// Info flags
-	versionFlag := flag.Bool("version", false, "Show version information")
-	versionLongFlag := flag.Bool("version.long", false, "Show detailed version information")
+	versionFlag := flag.Bool("version", false, "Print version and exit")
+	versionLongFlag := flag.Bool("version-long", false, "Print detailed build information and exit")
 
-	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "machineid - Generate unique machine identifiers based on hardware characteristics\n\n")
-		fmt.Fprintf(os.Stderr, "Usage:\n  machineid [flags]\n\nFlags:\n")
-		flag.PrintDefaults()
-		fmt.Fprintf(os.Stderr, "\nExamples:\n")
-		fmt.Fprintf(os.Stderr, "  machineid -cpu -uuid                          Generate ID from CPU + UUID\n")
-		fmt.Fprintf(os.Stderr, "  machineid -all -format 32                     All hardware, compact format\n")
-		fmt.Fprintf(os.Stderr, "  machineid -vm -salt \"my-app\"                   VM-friendly with salt\n")
-		fmt.Fprintf(os.Stderr, "  machineid -cpu -uuid -diagnostics             Show collected components\n")
-		fmt.Fprintf(os.Stderr, "  machineid -cpu -uuid -validate <id>           Validate an existing ID\n")
-		fmt.Fprintf(os.Stderr, "  machineid -cpu -uuid -json                    Output as JSON\n")
-		fmt.Fprintf(os.Stderr, "  machineid -cpu -uuid -verbose                 Show info-level logs\n")
-		fmt.Fprintf(os.Stderr, "  machineid -all -debug                         Show debug-level logs\n")
-		fmt.Fprintf(os.Stderr, "  machineid -version                            Show version\n")
-		fmt.Fprintf(os.Stderr, "  machineid -version.long                       Show detailed version\n")
-	}
+	flag.Usage = printUsage
 
 	flag.Parse()
 
-	// Handle version flag
 	if *versionFlag {
-		if version.Version == "0.0.0" {
-			if info, ok := debug.ReadBuildInfo(); ok {
-				fmt.Printf("%s version: %s\n", applicationName, info.Main.Version)
-			} else {
-				fmt.Printf("%s version: %s\n", applicationName, version.Version)
-			}
-		} else {
-			fmt.Printf("%s version: %s\n", applicationName, version.Version)
-		}
-
+		printVersion()
 		os.Exit(0)
 	}
 
-	// Handle detailed version flag
 	if *versionLongFlag {
-		var sb strings.Builder
-
-		if version.Version == "0.0.0" {
-			if info, ok := debug.ReadBuildInfo(); ok {
-				fmt.Fprintf(&sb, "%s version: %s, ", applicationName, info.Main.Version)
-				fmt.Fprintf(&sb, "Git commit: %s, ", info.Main.Sum)
-				fmt.Fprintf(&sb, "Go version: %s\n", info.GoVersion)
-			} else {
-				fmt.Fprintf(&sb, "%s version: %s\n", applicationName, version.Version)
-				fmt.Fprintf(&sb, "Build date: %s, ", version.BuildDate)
-				fmt.Fprintf(&sb, "Build user: %s, ", version.BuildUser)
-				fmt.Fprintf(&sb, "Git commit: %s, ", version.GitCommit)
-				fmt.Fprintf(&sb, "Git branch: %s, ", version.GitBranch)
-				fmt.Fprintf(&sb, "Go version: %s\n", version.GoVersion)
-			}
-		} else {
-			fmt.Fprintf(&sb, "%s version: %s, ", applicationName, version.Version)
-			fmt.Fprintf(&sb, "Build date: %s, ", version.BuildDate)
-			fmt.Fprintf(&sb, "Build user: %s, ", version.BuildUser)
-			fmt.Fprintf(&sb, "Git commit: %s, ", version.GitCommit)
-			fmt.Fprintf(&sb, "Git branch: %s, ", version.GitBranch)
-			fmt.Fprintf(&sb, "Go version: %s\n", version.GoVersion)
-		}
-
-		fmt.Print(sb.String())
+		printVersionLong()
 		os.Exit(0)
 	}
 
 	formatMode, err := parseFormatMode(*format)
 	if err != nil {
-		slog.Error("invalid format", "error", err)
-		flag.Usage()
-		os.Exit(1)
+		fmt.Fprintf(os.Stderr, "Error: %v\n\n", err)
+		printUsage()
+		os.Exit(2)
 	}
 
 	// Configure logger
@@ -137,9 +88,9 @@ func main() {
 
 	mFilter, err := parseMACFilter(*macFilterFlag)
 	if err != nil {
-		slog.Error("invalid mac-filter", "error", err)
-		flag.Usage()
-		os.Exit(1)
+		fmt.Fprintf(os.Stderr, "Error: %v\n\n", err)
+		printUsage()
+		os.Exit(2)
 	}
 
 	switch {
@@ -175,7 +126,7 @@ func main() {
 
 	id, err := provider.ID(ctx)
 	if err != nil {
-		slog.Error("failed to generate machine ID", "error", err)
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -192,6 +143,9 @@ func main() {
 			"format": *format,
 			"length": len(id),
 		}
+		if *salt != "" {
+			output["salt"] = *salt
+		}
 		if *diagnostics {
 			output["diagnostics"] = formatDiagnostics(provider)
 		}
@@ -204,6 +158,123 @@ func main() {
 	if *diagnostics {
 		printDiagnostics(provider)
 	}
+}
+
+func printUsage() {
+	w := os.Stderr
+	fmt.Fprintf(w, "Generate unique, deterministic machine identifiers from hardware characteristics.\n\n")
+	fmt.Fprintf(w, "Usage:\n")
+	fmt.Fprintf(w, "  %s [-cpu] [-uuid] [-motherboard] [-mac] [-disk] [options]\n", applicationName)
+	fmt.Fprintf(w, "  %s -all [options]\n", applicationName)
+	fmt.Fprintf(w, "  %s -vm [options]\n\n", applicationName)
+
+	fmt.Fprintf(w, "When no component flags are specified, the default is -cpu -motherboard -uuid.\n\n")
+
+	fmt.Fprintf(w, "Hardware Components:\n")
+	printFlag(w, "-cpu", "Include CPU identifier")
+	printFlag(w, "-motherboard", "Include motherboard serial number")
+	printFlag(w, "-uuid", "Include system UUID (BIOS/UEFI)")
+	printFlag(w, "-mac", "Include network interface MAC addresses")
+	printFlag(w, "-disk", "Include disk serial numbers")
+	printFlag(w, "-all", "Include all hardware identifiers")
+	printFlag(w, "-vm", "VM-friendly mode: CPU + UUID only")
+	fmt.Fprintln(w)
+
+	fmt.Fprintf(w, "Output Options:\n")
+	printFlag(w, "-format N", "Output length: 32, 64 (default), 128, or 256 hex chars")
+	printFlag(w, "-salt STRING", "Application-specific salt for unique IDs per app")
+	printFlag(w, "-mac-filter F", "MAC filter: physical (default), all, or virtual")
+	printFlag(w, "-json", "Format output as JSON")
+	printFlag(w, "-diagnostics", "Show collected/failed hardware components")
+	fmt.Fprintln(w)
+
+	fmt.Fprintf(w, "Validation:\n")
+	printFlag(w, "-validate ID", "Check a stored ID against the current machine")
+	fmt.Fprintln(w)
+
+	fmt.Fprintf(w, "Logging:\n")
+	printFlag(w, "-verbose", "Info-level logs to stderr (fallbacks, lifecycle)")
+	printFlag(w, "-debug", "Debug-level logs to stderr (commands, values, timing)")
+	fmt.Fprintln(w)
+
+	fmt.Fprintf(w, "Info:\n")
+	printFlag(w, "-version", "Print version and exit")
+	printFlag(w, "-version-long", "Print detailed build information and exit")
+	fmt.Fprintln(w)
+
+	fmt.Fprintf(w, "Examples:\n")
+	fmt.Fprintf(w, "  %s                                    Default: CPU + motherboard + UUID\n", applicationName)
+	fmt.Fprintf(w, "  %s -cpu -uuid                         Specific components\n", applicationName)
+	fmt.Fprintf(w, "  %s -all -format 32                    All hardware, compact output\n", applicationName)
+	fmt.Fprintf(w, "  %s -vm -salt \"my-app\"                  VM-friendly with salt\n", applicationName)
+	fmt.Fprintf(w, "  %s -all -json -diagnostics            JSON with diagnostics\n", applicationName)
+	fmt.Fprintf(w, "  %s -cpu -uuid -validate <id>          Validate a stored ID\n", applicationName)
+	fmt.Fprintf(w, "  %s -mac -mac-filter all               Include all MAC addresses\n", applicationName)
+	fmt.Fprintf(w, "  %s -all -verbose                      Show info-level logs\n", applicationName)
+	fmt.Fprintf(w, "  %s -all -debug                        Show debug-level logs\n", applicationName)
+	fmt.Fprintln(w)
+
+	fmt.Fprintf(w, "Exit Codes:\n")
+	fmt.Fprintf(w, "  0  Success\n")
+	fmt.Fprintf(w, "  1  ID generation or validation failed\n")
+	fmt.Fprintf(w, "  2  Invalid arguments\n")
+}
+
+func printFlag(w *os.File, name, desc string) {
+	fmt.Fprintf(w, "  %-20s %s\n", name, desc)
+}
+
+func printVersion() {
+	v := resolveVersion()
+	fmt.Printf("%s %s\n", applicationName, v)
+}
+
+func printVersionLong() {
+	v := resolveVersion()
+	fmt.Printf("%s %s\n", applicationName, v)
+
+	if version.Version != "0.0.0" {
+		printField("Build date", version.BuildDate)
+		printField("Git commit", version.GitCommit)
+		printField("Git branch", version.GitBranch)
+		printField("Build user", version.BuildUser)
+		printField("Go version", version.GoVersion)
+		printField("Platform", fmt.Sprintf("%s/%s", version.GoVersionOS, version.GoVersionArch))
+	} else if info, ok := debug.ReadBuildInfo(); ok {
+		printField("Module", info.Main.Path)
+		printField("Go version", info.GoVersion)
+		printField("Platform", fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH))
+
+		for _, setting := range info.Settings {
+			switch setting.Key {
+			case "vcs.revision":
+				printField("Git commit", setting.Value)
+			case "vcs.time":
+				printField("Commit date", setting.Value)
+			case "vcs.modified":
+				if setting.Value == "true" {
+					printField("Modified", "yes (uncommitted changes)")
+				}
+			}
+		}
+	}
+}
+
+func resolveVersion() string {
+	if version.Version != "0.0.0" {
+		return version.Version
+	}
+	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "(devel)" {
+		return info.Main.Version
+	}
+	return "devel"
+}
+
+func printField(label, value string) {
+	if value == "" {
+		return
+	}
+	fmt.Printf("  %-14s %s\n", label+":", value)
 }
 
 func parseFormatMode(format int) (machineid.FormatMode, error) {
@@ -237,7 +308,7 @@ func parseMACFilter(value string) (machineid.MACFilter, error) {
 func handleValidate(ctx context.Context, provider *machineid.Provider, expectedID string, jsonOut bool) {
 	valid, err := provider.Validate(ctx, expectedID)
 	if err != nil {
-		slog.Error("validation failed", "error", err)
+		fmt.Fprintf(os.Stderr, "Error: validation failed: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -304,7 +375,7 @@ func printJSON(v any) {
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(v); err != nil {
-		slog.Error("failed to encode JSON", "error", err)
+		fmt.Fprintf(os.Stderr, "Error: failed to encode JSON: %v\n", err)
 		os.Exit(1)
 	}
 }

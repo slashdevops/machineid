@@ -1,6 +1,7 @@
 {
   "cSpell.words": [
     "betteralign",
+    "codesign",
     "CPUID",
     "csproduct",
     "diskdrive",
@@ -8,11 +9,17 @@
     "golangci",
     "govulncheck",
     "ioreg",
+    "lipo",
     "machdep",
     "machineid",
+    "notarytool",
     "OSCPU",
+    "productsign",
+    "Sigstore",
     "slashdevops",
+    "softprops",
     "UEFI",
-    "vulncheck"
+    "vulncheck",
+    "xcrun"
   ]
 }
