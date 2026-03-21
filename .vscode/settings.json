@@ -1,6 +1,7 @@
 {
   "cSpell.words": [
     "betteralign",
+    "boyter",
     "codesign",
     "CPUID",
     "csproduct",
@@ -14,11 +15,14 @@
     "machineid",
     "notarytool",
     "OSCPU",
+    "pipefail",
     "productsign",
     "Sigstore",
     "slashdevops",
     "softprops",
+    "testcoverage",
     "UEFI",
+    "vladopajic",
     "vulncheck",
     "xcrun"
   ]
