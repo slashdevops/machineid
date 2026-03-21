@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <installer-gui-script minSpecVersion="2">
-    <title>machineid — Machine Identifier</title>
+    <title>machineid -- Machine Identifier</title>
     <welcome file="welcome.html"/>
     <readme file="readme.html"/>
     <license file="license.html"/>
