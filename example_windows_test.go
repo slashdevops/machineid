@@ -39,10 +39,10 @@ func Example_integrity() {
 	p3 := machineid.New().WithCPU().WithSystemUUID().WithSalt("app1")
 	p4 := machineid.New().WithCPU().WithSystemUUID().WithSalt("app2")
 
-	id1, _ := p1.ID(context.Background())   //nolint:errcheck // Example
-	id2, _ := p2.ID(context.Background())   //nolint:errcheck // Example
-	id3, _ := p3.ID(context.Background())   //nolint:errcheck // Example
-	id4, _ := p4.ID(context.Background())   //nolint:errcheck // Example
+	id1, _ := p1.ID(context.Background()) //nolint:errcheck // Example
+	id2, _ := p2.ID(context.Background()) //nolint:errcheck // Example
+	id3, _ := p3.ID(context.Background()) //nolint:errcheck // Example
+	id4, _ := p4.ID(context.Background()) //nolint:errcheck // Example
 
 	// Same configuration always produces same ID
 	id1Again, _ := machineid.New().WithCPU().WithSystemUUID().ID(context.Background()) //nolint:errcheck // Example
