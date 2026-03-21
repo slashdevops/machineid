@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<installer-gui-script minSpecVersion="2">
+    <title>machineid — Machine Identifier</title>
+    <welcome file="welcome.html"/>
+    <readme file="readme.html"/>
+    <license file="license.html"/>
+    <pkg-ref id="com.slashdevops.machineid"/>
+    <options customize="never" require-scripts="false" hostArchitectures="arm64,x86_64"/>
+    <choices-outline>
+        <line choice="default"/>
+    </choices-outline>
+    <choice id="default" title="machineid CLI Tool" description="Installs machineid to /usr/local/bin">
+        <pkg-ref id="com.slashdevops.machineid"/>
+    </choice>
+    <pkg-ref id="com.slashdevops.machineid" version="0" onConclusion="none">machineid-component.pkg</pkg-ref>
+</installer-gui-script>

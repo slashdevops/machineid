@@ -1,0 +1,64 @@
+<html>
+<head><style>
+  body { font-family: -apple-system, Helvetica Neue, sans-serif; font-size: 13px; color: #333; }
+  h1 { font-size: 18px; color: #111; }
+  h2 { font-size: 15px; color: #444; margin-top: 16px; }
+  code { background: #f0f0f0; padding: 2px 6px; border-radius: 3px; font-size: 12px; }
+  pre { background: #f5f5f5; padding: 10px; border-radius: 5px; font-size: 12px; overflow-x: auto; }
+  table { border-collapse: collapse; margin: 8px 0; }
+  th, td { text-align: left; padding: 4px 12px; border-bottom: 1px solid #e0e0e0; font-size: 12px; }
+  th { color: #555; }
+</style></head>
+<body>
+<h1>Installation Details</h1>
+
+<h2>Install location</h2>
+<table>
+  <tr><th>File</th><th>Path</th></tr>
+  <tr><td>Binary</td><td><code>/usr/local/bin/machineid</code></td></tr>
+</table>
+
+<h2>Getting started</h2>
+<pre># Generate a machine ID using default hardware signals
+machineid
+
+# Use all available hardware signals
+machineid -all
+
+# VM-friendly mode (CPU + System UUID only)
+machineid -vm
+
+# Generate with a custom salt
+machineid -all -salt "my-app-name"
+
+# JSON output with diagnostics
+machineid -all -json -diagnostics
+
+# Validate a previously generated ID
+machineid -all -validate "your-previously-generated-id"</pre>
+
+<h2>Features</h2>
+<ul>
+  <li>Zero external dependencies — built on the Go standard library</li>
+  <li>Cross-platform — macOS, Linux, Windows</li>
+  <li>Configurable hardware signals: CPU, Motherboard, System UUID, MAC, Disk</li>
+  <li>Power-of-2 output: 32, 64, 128, or 256 hex characters</li>
+  <li>SHA-256 hashing with optional salt</li>
+  <li>VM-friendly preset</li>
+</ul>
+
+<h2>How to uninstall</h2>
+<pre># Remove the binary
+sudo rm /usr/local/bin/machineid
+
+# Remove the installer receipt
+sudo pkgutil --forget com.slashdevops.machineid</pre>
+
+<h2>Links</h2>
+<ul>
+  <li>Source: <a href="https://github.com/slashdevops/machineid">github.com/slashdevops/machineid</a></li>
+  <li>Go docs: <a href="https://pkg.go.dev/github.com/slashdevops/machineid">pkg.go.dev/github.com/slashdevops/machineid</a></li>
+  <li>Issues: <a href="https://github.com/slashdevops/machineid/issues">github.com/slashdevops/machineid/issues</a></li>
+</ul>
+</body>
+</html>
