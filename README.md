@@ -345,7 +345,10 @@ See the [Installation](#installation) section above for all ways to install the 
 ### Examples
 
 ```bash
-# Generate an ID from CPU + UUID (default 64 chars)
+# Default: CPU + motherboard + UUID (64 hex chars)
+machineid
+
+# Specific components
 machineid -cpu -uuid
 
 # All hardware sources, compact 32-char format
@@ -355,49 +358,48 @@ machineid -all -format 32
 machineid -vm -salt "my-app"
 
 # JSON output with diagnostics
-machineid -cpu -uuid -json -diagnostics
+machineid -all -json -diagnostics
 
 # Validate a previously stored ID
 machineid -cpu -uuid -validate "b5c42832542981af58c9dc3bc241219e780ff7d276cfad05fac222846edb84f7"
 
-# Info-level logging (fallbacks, lifecycle events)
-machineid -cpu -uuid -verbose
-
-# Include only physical MACs (default)
-machineid -mac -mac-filter physical
-
 # Include all MACs (physical + virtual)
-machineid -all -mac-filter all
+machineid -mac -mac-filter all
+
+# Info-level logging (fallbacks, lifecycle events)
+machineid -all -verbose
 
 # Debug-level logging (command details, raw values, timing)
 machineid -all -debug
 
 # Version information
 machineid -version
-machineid -version.long
+machineid -version-long
 ```
 
 ### All Flags
 
-| Flag            | Description                                                     |
-|-----------------|-----------------------------------------------------------------|
-| `-cpu`          | Include CPU identifier                                          |
-| `-motherboard`  | Include motherboard serial number                               |
-| `-uuid`         | Include system UUID                                             |
-| `-mac`          | Include network MAC addresses                                   |
-| `-mac-filter F` | MAC filter: `physical` (default), `all`, or `virtual`           |
-| `-disk`         | Include disk serial numbers                                     |
-| `-all`          | Include all hardware identifiers                                |
-| `-vm`           | VM-friendly mode (CPU + UUID only)                              |
-| `-format N`     | Output length: `32`, `64` (default), `128`, or `256`            |
-| `-salt STRING`  | Custom salt for application-specific IDs                        |
-| `-validate ID`  | Validate an ID against the current machine                      |
-| `-diagnostics`  | Show collected/failed components                                |
-| `-json`         | Output as JSON                                                  |
-| `-verbose`      | Enable info-level logging to stderr (fallbacks, lifecycle)      |
-| `-debug`        | Enable debug-level logging to stderr (commands, values, timing) |
-| `-version`      | Show version information                                        |
-| `-version.long` | Show detailed version information                               |
+| Flag             | Description                                                         |
+|------------------|---------------------------------------------------------------------|
+| `-cpu`           | Include CPU identifier                                              |
+| `-motherboard`   | Include motherboard serial number                                   |
+| `-uuid`          | Include system UUID (BIOS/UEFI)                                     |
+| `-mac`           | Include network interface MAC addresses                             |
+| `-mac-filter F`  | MAC filter: `physical` (default), `all`, or `virtual`               |
+| `-disk`          | Include disk serial numbers                                         |
+| `-all`           | Include all hardware identifiers (CPU, motherboard, UUID, MAC, disk)|
+| `-vm`            | VM-friendly mode: CPU + UUID only                                   |
+| `-format N`      | Output length: `32`, `64` (default), `128`, or `256` hex chars      |
+| `-salt STRING`   | Application-specific salt for unique IDs per app                    |
+| `-validate ID`   | Check a stored ID against the current machine                       |
+| `-diagnostics`   | Show which hardware components were collected or failed             |
+| `-json`          | Format output as JSON                                               |
+| `-verbose`       | Info-level logs to stderr (fallbacks, lifecycle)                    |
+| `-debug`         | Debug-level logs to stderr (commands, values, timing)               |
+| `-version`       | Print version and exit                                              |
+| `-version-long`  | Print detailed build information and exit                           |
+
+When no component flags are specified, the default is `-cpu -motherboard -uuid`.
 
 ## How It Works
 
@@ -415,6 +417,8 @@ machineid -version.long
 | **Windows** | `wmic`, `PowerShell` | `wmic`, `PowerShell` | `wmic`, `PowerShell` | `wmic`, `PowerShell` | `net.Interfaces` |
 
 Each source has fallback methods for resilience across OS versions and configurations.
+
+> **Performance note**: On Windows, all hardware queries run **concurrently** using goroutines. This reduces total latency from the sum of all `wmic`/PowerShell calls (which are slow due to process startup overhead) to the maximum of any single call — typically cutting ID generation time from ~8-12s to ~2-3s.
 
 ## Testing
 
@@ -506,11 +510,13 @@ error: failed to push some refs to 'github.com:slashdevops/machineid.git'
 **Solution**: Create a tag with a version number higher than all existing tags.
 
 1. Check existing tags:
+
    ```bash
    git tag -l
    ```
 
 2. Create the next appropriate version:
+
    ```bash
    # If the latest tag is v0.0.2, use v0.0.3 or higher
    git tag -a "v0.0.3" -m "Release v0.0.3"

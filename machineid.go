@@ -87,12 +87,12 @@ type Provider struct {
 	salt               string
 	cachedID           string
 	formatMode         FormatMode
+	macFilter          MACFilter
 	mu                 sync.Mutex
 	includeCPU         bool
 	includeMotherboard bool
 	includeSystemUUID  bool
 	includeMAC         bool
-	macFilter          MACFilter
 	includeDisk        bool
 }
 

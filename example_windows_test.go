@@ -1,4 +1,4 @@
-//go:build darwin
+//go:build windows
 
 package machineid_test
 
@@ -10,7 +10,7 @@ import (
 )
 
 // ExampleProvider_Diagnostics demonstrates inspecting which hardware components
-// were successfully collected.
+// were successfully collected on Windows.
 func ExampleProvider_Diagnostics() {
 	provider := machineid.New().
 		WithCPU().
@@ -34,7 +34,6 @@ func ExampleProvider_Diagnostics() {
 
 // Example_integrity demonstrates that the format maintains integrity without collisions.
 func Example_integrity() {
-	// Generate multiple IDs to show consistency and uniqueness
 	p1 := machineid.New().WithCPU().WithSystemUUID()
 	p2 := machineid.New().WithCPU().WithSystemUUID().WithMotherboard()
 	p3 := machineid.New().WithCPU().WithSystemUUID().WithSalt("app1")
@@ -62,4 +61,28 @@ func Example_integrity() {
 	// Different hardware: true
 	// Different salts: true
 	// All are 64 chars: true
+}
+
+// Example_concurrentCollection demonstrates that Windows collects hardware
+// identifiers concurrently for better performance.
+func Example_concurrentCollection() {
+	// On Windows, all hardware queries (wmic/PowerShell) run in parallel,
+	// reducing total latency from the sum of all commands to the max of
+	// any single command.
+	provider := machineid.New().
+		WithCPU().
+		WithMotherboard().
+		WithSystemUUID().
+		WithMAC().
+		WithDisk()
+
+	id, err := provider.ID(context.Background())
+	if err != nil {
+		fmt.Printf("error: %v\n", err)
+		return
+	}
+
+	fmt.Printf("ID length: %d\n", len(id))
+	// Output:
+	// ID length: 64
 }

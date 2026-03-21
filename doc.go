@@ -156,8 +156,15 @@
 // # Platform Support
 //
 // Supported operating systems: macOS (darwin), Linux, and Windows. Each
-// platform uses native tools (system_profiler / ioreg, /sys / lsblk, wmic /
-// PowerShell) to collect hardware data.
+// platform uses native tools to collect hardware data:
+//
+//   - macOS: system_profiler, ioreg, sysctl
+//   - Linux: /proc/cpuinfo, /sys/class/dmi/id, /etc/machine-id, lsblk, /sys/block
+//   - Windows: wmic, PowerShell (Get-CimInstance) — collected concurrently
+//
+// On Windows, all hardware queries run in parallel using goroutines to
+// minimize latency from slow process startup (wmic and PowerShell). Each
+// command uses wmic as the primary method with PowerShell as fallback.
 //
 // # Installation
 //
@@ -174,14 +181,16 @@
 //
 // # CLI Tool
 //
-// A ready-to-use command-line tool is provided in cmd/machineid:
+// A ready-to-use command-line tool is provided in cmd/machineid.
+// When no component flags are specified, the default is -cpu -motherboard -uuid.
 //
-//	machineid -cpu -uuid
-//	machineid -all -format 32 -json
-//	machineid -vm -salt "my-app" -diagnostics
-//	machineid -mac -mac-filter all
-//	machineid -cpu -uuid -verbose
-//	machineid -all -debug
-//	machineid -version
-//	machineid -version.long
+//	machineid                               # default: CPU + motherboard + UUID
+//	machineid -cpu -uuid                    # specific components
+//	machineid -all -format 32 -json         # all hardware, compact JSON
+//	machineid -vm -salt "my-app"            # VM-friendly with salt
+//	machineid -mac -mac-filter all          # include all MAC addresses
+//	machineid -all -verbose                 # info-level logs
+//	machineid -all -debug                   # debug-level logs
+//	machineid -version                      # version info
+//	machineid -version-long                 # detailed build info
 package machineid

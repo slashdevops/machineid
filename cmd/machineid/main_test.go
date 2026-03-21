@@ -38,6 +38,35 @@ func TestParseFormatMode(t *testing.T) {
 	}
 }
 
+func TestParseMACFilter(t *testing.T) {
+	tests := []struct {
+		input   string
+		want    machineid.MACFilter
+		wantErr bool
+	}{
+		{"physical", machineid.MACFilterPhysical, false},
+		{"Physical", machineid.MACFilterPhysical, false},
+		{"PHYSICAL", machineid.MACFilterPhysical, false},
+		{"all", machineid.MACFilterAll, false},
+		{"ALL", machineid.MACFilterAll, false},
+		{"virtual", machineid.MACFilterVirtual, false},
+		{"Virtual", machineid.MACFilterVirtual, false},
+		{"invalid", 0, true},
+		{"", 0, true},
+	}
+
+	for _, tt := range tests {
+		got, err := parseMACFilter(tt.input)
+		if (err != nil) != tt.wantErr {
+			t.Errorf("parseMACFilter(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
+			continue
+		}
+		if got != tt.want {
+			t.Errorf("parseMACFilter(%q) = %v, want %v", tt.input, got, tt.want)
+		}
+	}
+}
+
 func TestFormatDiagnosticsNil(t *testing.T) {
 	provider := machineid.New()
 	// Before ID() call, Diagnostics() is nil
@@ -83,7 +112,9 @@ func TestPrintDiagnosticsWithData(t *testing.T) {
 
 func TestFormatDiagnosticsWithErrors(t *testing.T) {
 	provider := machineid.New().WithCPU().WithDisk()
-	_, _ = provider.ID(t.Context())
+	if _, err := provider.ID(t.Context()); err != nil {
+		t.Logf("ID() error (may be expected): %v", err)
+	}
 
 	result := formatDiagnostics(provider)
 	if result == nil {
@@ -99,7 +130,10 @@ func TestFormatDiagnosticsWithErrors(t *testing.T) {
 func TestPrintJSON(t *testing.T) {
 	// Capture stdout
 	oldStdout := os.Stdout
-	r, w, _ := os.Pipe()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe() error: %v", err)
+	}
 	os.Stdout = w
 
 	printJSON(map[string]any{"key": "value"})
@@ -108,7 +142,9 @@ func TestPrintJSON(t *testing.T) {
 	os.Stdout = oldStdout
 
 	var buf bytes.Buffer
-	io.Copy(&buf, r)
+	if _, err := io.Copy(&buf, r); err != nil {
+		t.Fatalf("io.Copy error: %v", err)
+	}
 
 	var result map[string]any
 	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
@@ -128,7 +164,10 @@ func TestHandleValidateValid(t *testing.T) {
 
 	// Capture stdout
 	oldStdout := os.Stdout
-	r, w, _ := os.Pipe()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe() error: %v", err)
+	}
 	os.Stdout = w
 
 	handleValidate(t.Context(), provider, id, false)
@@ -137,7 +176,9 @@ func TestHandleValidateValid(t *testing.T) {
 	os.Stdout = oldStdout
 
 	var buf bytes.Buffer
-	io.Copy(&buf, r)
+	if _, err := io.Copy(&buf, r); err != nil {
+		t.Fatalf("io.Copy error: %v", err)
+	}
 
 	if !bytes.Contains(buf.Bytes(), []byte("valid: machine ID matches")) {
 		t.Errorf("Expected 'valid: machine ID matches', got %q", buf.String())
@@ -153,7 +194,10 @@ func TestHandleValidateValidJSON(t *testing.T) {
 
 	// Capture stdout
 	oldStdout := os.Stdout
-	r, w, _ := os.Pipe()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe() error: %v", err)
+	}
 	os.Stdout = w
 
 	handleValidate(t.Context(), provider, id, true)
@@ -162,7 +206,9 @@ func TestHandleValidateValidJSON(t *testing.T) {
 	os.Stdout = oldStdout
 
 	var buf bytes.Buffer
-	io.Copy(&buf, r)
+	if _, err := io.Copy(&buf, r); err != nil {
+		t.Fatalf("io.Copy error: %v", err)
+	}
 
 	var result map[string]any
 	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
@@ -170,5 +216,94 @@ func TestHandleValidateValidJSON(t *testing.T) {
 	}
 	if result["valid"] != true {
 		t.Errorf("Expected valid=true, got %v", result["valid"])
+	}
+}
+
+func TestResolveVersion(t *testing.T) {
+	v := resolveVersion()
+	if v == "" {
+		t.Error("resolveVersion() returned empty string")
+	}
+	// In test environment without ldflags, should return "devel" or a module version
+	t.Logf("resolveVersion() = %q", v)
+}
+
+func TestPrintFlag(t *testing.T) {
+	// Capture stderr
+	oldStderr := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe() error: %v", err)
+	}
+	os.Stderr = w
+
+	printFlag(w, "-cpu", "Include CPU identifier")
+
+	w.Close()
+	os.Stderr = oldStderr
+
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, r); err != nil {
+		t.Fatalf("io.Copy error: %v", err)
+	}
+
+	output := buf.String()
+	if !bytes.Contains([]byte(output), []byte("-cpu")) {
+		t.Errorf("Expected '-cpu' in output, got %q", output)
+	}
+	if !bytes.Contains([]byte(output), []byte("Include CPU identifier")) {
+		t.Errorf("Expected description in output, got %q", output)
+	}
+}
+
+func TestPrintField(t *testing.T) {
+	// Capture stdout
+	oldStdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe() error: %v", err)
+	}
+	os.Stdout = w
+
+	printField("Go version", "go1.25.0")
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, r); err != nil {
+		t.Fatalf("io.Copy error: %v", err)
+	}
+
+	output := buf.String()
+	if !bytes.Contains([]byte(output), []byte("Go version:")) {
+		t.Errorf("Expected 'Go version:' in output, got %q", output)
+	}
+	if !bytes.Contains([]byte(output), []byte("go1.25.0")) {
+		t.Errorf("Expected 'go1.25.0' in output, got %q", output)
+	}
+}
+
+func TestPrintFieldEmpty(t *testing.T) {
+	// Capture stdout
+	oldStdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe() error: %v", err)
+	}
+	os.Stdout = w
+
+	printField("Empty", "")
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, r); err != nil {
+		t.Fatalf("io.Copy error: %v", err)
+	}
+
+	if buf.Len() != 0 {
+		t.Errorf("Expected no output for empty value, got %q", buf.String())
 	}
 }

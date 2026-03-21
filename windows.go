@@ -6,44 +6,164 @@ import (
 	"context"
 	"log/slog"
 	"strings"
+	"sync"
 )
 
-// collectIdentifiers gathers Windows-specific hardware identifiers based on provider config.
+// componentResult holds the result from a single concurrent component collection.
+type componentResult struct {
+	component string
+	prefix    string
+	value     string   // for single-value components
+	values    []string // for multi-value components (MAC, disk)
+	err       error
+	multi     bool // true if this is a multi-value result
+}
+
+// collectIdentifiers gathers Windows-specific hardware identifiers concurrently.
+// Windows commands (wmic, PowerShell) are slow due to process startup overhead,
+// so all components are collected in parallel to minimize total latency.
 func collectIdentifiers(ctx context.Context, p *Provider, diag *DiagnosticInfo) ([]string, error) {
-	var identifiers []string
 	logger := p.logger
 
+	var wg sync.WaitGroup
+	resultsCh := make(chan componentResult, 5)
+
 	if p.includeCPU {
-		identifiers = appendIdentifierIfValid(identifiers, func() (string, error) {
-			return windowsCPUID(ctx, p.commandExecutor, logger)
-		}, "cpu:", diag, ComponentCPU, logger)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			value, err := windowsCPUID(ctx, p.commandExecutor, logger)
+			resultsCh <- componentResult{component: ComponentCPU, prefix: "cpu:", value: value, err: err}
+		}()
 	}
 
 	if p.includeMotherboard {
-		identifiers = appendIdentifierIfValid(identifiers, func() (string, error) {
-			return windowsMotherboardSerial(ctx, p.commandExecutor, logger)
-		}, "mb:", diag, ComponentMotherboard, logger)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			value, err := windowsMotherboardSerial(ctx, p.commandExecutor, logger)
+			resultsCh <- componentResult{component: ComponentMotherboard, prefix: "mb:", value: value, err: err}
+		}()
 	}
 
 	if p.includeSystemUUID {
-		identifiers = appendIdentifierIfValid(identifiers, func() (string, error) {
-			return windowsSystemUUID(ctx, p.commandExecutor, logger)
-		}, "uuid:", diag, ComponentSystemUUID, logger)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			value, err := windowsSystemUUID(ctx, p.commandExecutor, logger)
+			resultsCh <- componentResult{component: ComponentSystemUUID, prefix: "uuid:", value: value, err: err}
+		}()
 	}
 
 	if p.includeMAC {
-		identifiers = appendIdentifiersIfValid(identifiers, func() ([]string, error) {
-			return collectMACAddresses(p.macFilter, logger)
-		}, "mac:", diag, ComponentMAC, logger)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			values, err := collectMACAddresses(p.macFilter, logger)
+			resultsCh <- componentResult{component: ComponentMAC, prefix: "mac:", values: values, err: err, multi: true}
+		}()
 	}
 
 	if p.includeDisk {
-		identifiers = appendIdentifiersIfValid(identifiers, func() ([]string, error) {
-			return windowsDiskSerials(ctx, p.commandExecutor, logger)
-		}, "disk:", diag, ComponentDisk, logger)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			values, err := windowsDiskSerials(ctx, p.commandExecutor, logger)
+			resultsCh <- componentResult{component: ComponentDisk, prefix: "disk:", values: values, err: err, multi: true}
+		}()
+	}
+
+	// Close channel once all goroutines complete.
+	go func() {
+		wg.Wait()
+		close(resultsCh)
+	}()
+
+	// Collect results and build identifiers.
+	var identifiers []string
+	for r := range resultsCh {
+		if r.multi {
+			identifiers = appendMultiResult(identifiers, r, diag, logger)
+		} else {
+			identifiers = appendSingleResult(identifiers, r, diag, logger)
+		}
 	}
 
 	return identifiers, nil
+}
+
+// appendSingleResult processes a single-value component result into identifiers.
+func appendSingleResult(identifiers []string, r componentResult, diag *DiagnosticInfo, logger *slog.Logger) []string {
+	if r.err != nil {
+		compErr := &ComponentError{Component: r.component, Err: r.err}
+		if diag != nil {
+			diag.Errors[r.component] = compErr
+		}
+		if logger != nil {
+			logger.Warn("component failed", "component", r.component, "error", r.err)
+		}
+		return identifiers
+	}
+
+	if r.value == "" {
+		compErr := &ComponentError{Component: r.component, Err: ErrEmptyValue}
+		if diag != nil {
+			diag.Errors[r.component] = compErr
+		}
+		if logger != nil {
+			logger.Warn("component returned empty value", "component", r.component)
+		}
+		return identifiers
+	}
+
+	if diag != nil {
+		diag.Collected = append(diag.Collected, r.component)
+	}
+	if logger != nil {
+		logger.Info("component collected", "component", r.component)
+		logger.Debug("component value", "component", r.component, "value", r.value)
+	}
+
+	return append(identifiers, r.prefix+r.value)
+}
+
+// appendMultiResult processes a multi-value component result into identifiers.
+func appendMultiResult(identifiers []string, r componentResult, diag *DiagnosticInfo, logger *slog.Logger) []string {
+	if r.err != nil {
+		compErr := &ComponentError{Component: r.component, Err: r.err}
+		if diag != nil {
+			diag.Errors[r.component] = compErr
+		}
+		if logger != nil {
+			logger.Warn("component failed", "component", r.component, "error", r.err)
+		}
+		return identifiers
+	}
+
+	if len(r.values) == 0 {
+		compErr := &ComponentError{Component: r.component, Err: ErrNoValues}
+		if diag != nil {
+			diag.Errors[r.component] = compErr
+		}
+		if logger != nil {
+			logger.Warn("component returned no values", "component", r.component)
+		}
+		return identifiers
+	}
+
+	if diag != nil {
+		diag.Collected = append(diag.Collected, r.component)
+	}
+	if logger != nil {
+		logger.Info("component collected", "component", r.component, "count", len(r.values))
+		logger.Debug("component values", "component", r.component, "values", r.values)
+	}
+
+	for _, value := range r.values {
+		identifiers = append(identifiers, r.prefix+value)
+	}
+
+	return identifiers
 }
 
 // parseWmicValue extracts value from wmic output with given prefix.

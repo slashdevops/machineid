@@ -392,9 +392,18 @@ func TestFormatDifference(t *testing.T) {
 	g64 := machineid.New().WithCPU().WithSystemUUID().WithFormat(machineid.Format64)
 	g128 := machineid.New().WithCPU().WithSystemUUID().WithFormat(machineid.Format128)
 
-	id32, _ := g32.ID(context.Background())
-	id64, _ := g64.ID(context.Background())
-	id128, _ := g128.ID(context.Background())
+	id32, err := g32.ID(context.Background())
+	if err != nil {
+		t.Fatalf("Format32 ID() error: %v", err)
+	}
+	id64, err := g64.ID(context.Background())
+	if err != nil {
+		t.Fatalf("Format64 ID() error: %v", err)
+	}
+	id128, err := g128.ID(context.Background())
+	if err != nil {
+		t.Fatalf("Format128 ID() error: %v", err)
+	}
 
 	// Format32 should be the first 32 chars of Format64
 	if id32 != id64[:32] {
