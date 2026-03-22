@@ -1,5 +1,6 @@
 <html>
 <head><meta charset="utf-8">
+<meta name="color-scheme" content="light dark">
 <style>
   body { font-family: -apple-system, Helvetica Neue, sans-serif; font-size: 13px; color: #333; }
   h1 { font-size: 18px; color: #111; }
@@ -9,6 +10,16 @@
   table { border-collapse: collapse; margin: 8px 0; }
   th, td { text-align: left; padding: 4px 12px; border-bottom: 1px solid #e0e0e0; font-size: 12px; }
   th { color: #555; }
+  @media (prefers-color-scheme: dark) {
+    body { color: #ddd; }
+    h1 { color: #eee; }
+    h2 { color: #ccc; }
+    code { background: #3a3a3a; color: #ddd; }
+    pre { background: #2a2a2a; color: #ddd; }
+    th, td { border-bottom-color: #444; }
+    th { color: #aaa; }
+    a { color: #6cb4ff; }
+  }
 </style></head>
 <body>
 <h1>Installation Details</h1>
