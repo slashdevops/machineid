@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -23,7 +25,10 @@ stepping	: 10
 cpu MHz		: 2600.000
 flags		: fpu vme de pse tsc msr pae mce
 `
-	result := parseCPUInfo(content)
+	result, err := parseCPUInfo(content)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
 	expected := "0:GenuineIntel:Intel(R) Core(TM) i7-9750H CPU @ 2.60GHz:fpu vme de pse tsc msr pae mce"
 	if result != expected {
 		t.Errorf("Expected %q, got %q", expected, result)
@@ -31,10 +36,16 @@ flags		: fpu vme de pse tsc msr pae mce
 }
 
 func TestParseCPUInfoEmpty(t *testing.T) {
-	result := parseCPUInfo("")
-	expected := ":::"
-	if result != expected {
-		t.Errorf("Expected %q for empty input, got %q", expected, result)
+	_, err := parseCPUInfo("")
+	if err == nil {
+		t.Fatal("Expected error for empty input")
+	}
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("Expected ErrNotFound, got %v", err)
+	}
+	var parseErr *ParseError
+	if !errors.As(err, &parseErr) {
+		t.Errorf("Expected ParseError, got %T", err)
 	}
 }
 
@@ -43,7 +54,10 @@ func TestParseCPUInfoPartial(t *testing.T) {
 vendor_id	: AuthenticAMD
 model name	: AMD Ryzen 9 5950X
 `
-	result := parseCPUInfo(content)
+	result, err := parseCPUInfo(content)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
 	expected := "3:AuthenticAMD:AMD Ryzen 9 5950X:"
 	if result != expected {
 		t.Errorf("Expected %q, got %q", expected, result)
@@ -52,10 +66,24 @@ model name	: AMD Ryzen 9 5950X
 
 func TestParseCPUInfoNoColon(t *testing.T) {
 	content := "some line without colon\nanother line\n"
-	result := parseCPUInfo(content)
-	expected := ":::"
-	if result != expected {
-		t.Errorf("Expected %q, got %q", expected, result)
+	_, err := parseCPUInfo(content)
+	if err == nil {
+		t.Fatal("Expected error when no fields present")
+	}
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("Expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestParseCPUInfoUnknownFieldsOnly(t *testing.T) {
+	// Lines have colons but none are recognized fields — should still error.
+	content := "some unknown key : value\nanother : thing\n"
+	_, err := parseCPUInfo(content)
+	if err == nil {
+		t.Fatal("Expected error when no recognized fields present")
+	}
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("Expected ErrNotFound, got %v", err)
 	}
 }
 
@@ -71,7 +99,10 @@ vendor_id	: GenuineIntel
 model name	: Intel Core i7
 flags		: fpu vme avx
 `
-	result := parseCPUInfo(content)
+	result, err := parseCPUInfo(content)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
 	// Last processor's values should win
 	expected := "1:GenuineIntel:Intel Core i7:fpu vme avx"
 	if result != expected {
@@ -187,6 +218,227 @@ func TestLinuxDiskSerialsLSBLKSkipsEmpty(t *testing.T) {
 	}
 	if len(serials) != 2 {
 		t.Errorf("Expected 2 serials (empty lines skipped), got %d", len(serials))
+	}
+}
+
+func TestLinuxDiskSerialsLSBLKFiltersOEM(t *testing.T) {
+	mock := newMockExecutor()
+	mock.setOutput("lsblk", "WD-12345\nTo be filled by O.E.M.\nSAMSUNG-67890\n")
+
+	serials, err := linuxDiskSerialsLSBLK(context.Background(), mock, nil)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if len(serials) != 2 {
+		t.Fatalf("Expected 2 serials (OEM filtered), got %d: %v", len(serials), serials)
+	}
+	for _, s := range serials {
+		if s == biosFirmwareMessage {
+			t.Error("OEM placeholder leaked into lsblk disk serials")
+		}
+	}
+}
+
+// --- linuxDiskSerialsSys tests (with injected sysBlockDir) ---
+
+func withSysBlockDir(t *testing.T, dir string) {
+	t.Helper()
+	orig := sysBlockDir
+	sysBlockDir = dir
+	t.Cleanup(func() { sysBlockDir = orig })
+}
+
+func writeFakeDisk(t *testing.T, root, name, serial string) {
+	t.Helper()
+	deviceDir := filepath.Join(root, name, "device")
+	if err := os.MkdirAll(deviceDir, 0o755); err != nil {
+		t.Fatalf("mkdir %q: %v", deviceDir, err)
+	}
+	if err := os.WriteFile(filepath.Join(deviceDir, "serial"), []byte(serial), 0o644); err != nil {
+		t.Fatalf("write serial %q: %v", name, err)
+	}
+}
+
+func TestLinuxDiskSerialsSysSuccess(t *testing.T) {
+	tmp := t.TempDir()
+	withSysBlockDir(t, tmp)
+
+	writeFakeDisk(t, tmp, "sda", "WD-AAA\n")
+	writeFakeDisk(t, tmp, "sdb", "SAMSUNG-BBB\n")
+
+	serials, err := linuxDiskSerialsSys(nil)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if len(serials) != 2 {
+		t.Fatalf("Expected 2 serials, got %d: %v", len(serials), serials)
+	}
+}
+
+func TestLinuxDiskSerialsSysSkipsLoop(t *testing.T) {
+	tmp := t.TempDir()
+	withSysBlockDir(t, tmp)
+
+	writeFakeDisk(t, tmp, "sda", "WD-AAA\n")
+	writeFakeDisk(t, tmp, "loop0", "SHOULD-SKIP\n")
+
+	serials, err := linuxDiskSerialsSys(nil)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if len(serials) != 1 || serials[0] != "WD-AAA" {
+		t.Errorf("Expected [WD-AAA], got %v", serials)
+	}
+}
+
+func TestLinuxDiskSerialsSysFiltersOEMAndEmpty(t *testing.T) {
+	tmp := t.TempDir()
+	withSysBlockDir(t, tmp)
+
+	writeFakeDisk(t, tmp, "sda", "WD-REAL\n")
+	writeFakeDisk(t, tmp, "sdb", "To be filled by O.E.M.\n")
+	writeFakeDisk(t, tmp, "sdc", "\n")
+
+	serials, err := linuxDiskSerialsSys(nil)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if len(serials) != 1 || serials[0] != "WD-REAL" {
+		t.Errorf("Expected [WD-REAL], got %v", serials)
+	}
+}
+
+func TestLinuxDiskSerialsSysMissingDir(t *testing.T) {
+	withSysBlockDir(t, filepath.Join(t.TempDir(), "does-not-exist"))
+
+	_, err := linuxDiskSerialsSys(nil)
+	if err == nil {
+		t.Error("Expected error when sysBlockDir does not exist")
+	}
+}
+
+// --- linuxDiskSerials end-to-end with both backends failing ---
+
+func TestLinuxDiskSerialsBothBackendsFail(t *testing.T) {
+	// lsblk errors, sys dir does not exist → ErrNotFound.
+	withSysBlockDir(t, filepath.Join(t.TempDir(), "nope"))
+	mock := newMockExecutor()
+	mock.setError("lsblk", fmt.Errorf("lsblk not found"))
+
+	_, err := linuxDiskSerials(context.Background(), mock, nil)
+	if err == nil {
+		t.Fatal("Expected error when both backends fail")
+	}
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("Expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestLinuxDiskSerialsPartialSuccess(t *testing.T) {
+	// lsblk succeeds, /sys/block missing → no error, lsblk results returned.
+	withSysBlockDir(t, filepath.Join(t.TempDir(), "nope"))
+	mock := newMockExecutor()
+	mock.setOutput("lsblk", "SERIAL-X\n")
+
+	serials, err := linuxDiskSerials(context.Background(), mock, nil)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if len(serials) != 1 || serials[0] != "SERIAL-X" {
+		t.Errorf("Expected [SERIAL-X], got %v", serials)
+	}
+}
+
+func TestLinuxDiskSerialsDeduplicatesAcrossBackends(t *testing.T) {
+	tmp := t.TempDir()
+	withSysBlockDir(t, tmp)
+	writeFakeDisk(t, tmp, "sda", "SHARED\n")
+	writeFakeDisk(t, tmp, "sdb", "ONLY-SYS\n")
+
+	mock := newMockExecutor()
+	mock.setOutput("lsblk", "SHARED\nONLY-LSBLK\n")
+
+	serials, err := linuxDiskSerials(context.Background(), mock, nil)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	// Expected: SHARED, ONLY-LSBLK, ONLY-SYS — no duplicates.
+	if len(serials) != 3 {
+		t.Fatalf("Expected 3 unique serials, got %d: %v", len(serials), serials)
+	}
+	count := map[string]int{}
+	for _, s := range serials {
+		count[s]++
+	}
+	for k, c := range count {
+		if c != 1 {
+			t.Errorf("Serial %q appeared %d times", k, c)
+		}
+	}
+}
+
+func TestLinuxDiskSerialsFiltersOEMAcrossBackends(t *testing.T) {
+	tmp := t.TempDir()
+	withSysBlockDir(t, tmp)
+	writeFakeDisk(t, tmp, "sda", "GOOD-SYS\n")
+
+	mock := newMockExecutor()
+	mock.setOutput("lsblk", "GOOD-LSBLK\nTo be filled by O.E.M.\n")
+
+	serials, err := linuxDiskSerials(context.Background(), mock, nil)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	for _, s := range serials {
+		if s == biosFirmwareMessage {
+			t.Error("OEM placeholder leaked through linuxDiskSerials")
+		}
+	}
+	if len(serials) != 2 {
+		t.Errorf("Expected 2 serials, got %d: %v", len(serials), serials)
+	}
+}
+
+// --- readFirstValidFromLocations success path ---
+
+func TestReadFirstValidFromLocationsFindsFile(t *testing.T) {
+	tmp := t.TempDir()
+	goodPath := filepath.Join(tmp, "good")
+	if err := os.WriteFile(goodPath, []byte("  HELLO  \n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	locations := []string{
+		filepath.Join(tmp, "missing"),
+		goodPath,
+	}
+
+	value, err := readFirstValidFromLocations(locations, isNonEmpty, nil)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if value != "HELLO" {
+		t.Errorf("Expected %q, got %q", "HELLO", value)
+	}
+}
+
+func TestReadFirstValidFromLocationsSkipsInvalid(t *testing.T) {
+	tmp := t.TempDir()
+	invalidPath := filepath.Join(tmp, "invalid")
+	goodPath := filepath.Join(tmp, "good")
+	if err := os.WriteFile(invalidPath, []byte("00000000-0000-0000-0000-000000000000\n"), 0o644); err != nil {
+		t.Fatalf("write invalid: %v", err)
+	}
+	if err := os.WriteFile(goodPath, []byte("real-uuid\n"), 0o644); err != nil {
+		t.Fatalf("write good: %v", err)
+	}
+
+	value, err := readFirstValidFromLocations([]string{invalidPath, goodPath}, isValidUUID, nil)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if value != "real-uuid" {
+		t.Errorf("Expected %q, got %q", "real-uuid", value)
 	}
 }
 
