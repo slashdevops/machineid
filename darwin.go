@@ -17,6 +17,11 @@ var (
 	ioregSerialRe = regexp.MustCompile(`"IOPlatformSerialNumber"\s*=\s*"([^"]+)"`)
 )
 
+// nullUUID is the all-zero UUID that some firmware implementations return
+// when no real hardware UUID is programmed. It must be rejected so it
+// cannot contribute to the machine ID.
+const nullUUID = "00000000-0000-0000-0000-000000000000"
+
 // spHardwareDataType represents the JSON output of `system_profiler SPHardwareDataType -json`.
 type spHardwareDataType struct {
 	SPHardwareDataType []spHardwareEntry `json:"SPHardwareDataType"`
@@ -90,6 +95,7 @@ func collectIdentifiers(ctx context.Context, p *Provider, diag *DiagnosticInfo) 
 }
 
 // macOSHardwareUUID retrieves hardware UUID using system_profiler with JSON parsing.
+// Null UUIDs (all zeros) are rejected so the fallback path is triggered.
 func macOSHardwareUUID(ctx context.Context, executor CommandExecutor, logger *slog.Logger) (string, error) {
 	output, err := executeCommand(ctx, executor, logger, "system_profiler", "SPHardwareDataType", "-json")
 	if err == nil {
@@ -97,10 +103,14 @@ func macOSHardwareUUID(ctx context.Context, executor CommandExecutor, logger *sl
 			return e.PlatformUUID
 		})
 		if parseErr == nil {
-			return uuid, nil
-		}
-
-		if logger != nil {
+			if uuid == nullUUID {
+				if logger != nil {
+					logger.Debug("system_profiler returned null UUID, falling back")
+				}
+			} else {
+				return uuid, nil
+			}
+		} else if logger != nil {
 			logger.Debug("system_profiler UUID parsing failed", "error", parseErr)
 		}
 	}
@@ -114,6 +124,7 @@ func macOSHardwareUUID(ctx context.Context, executor CommandExecutor, logger *sl
 }
 
 // macOSHardwareUUIDViaIOReg retrieves hardware UUID using ioreg as fallback.
+// Null UUIDs (all zeros) are rejected with ErrNotFound.
 func macOSHardwareUUIDViaIOReg(ctx context.Context, executor CommandExecutor, logger *slog.Logger) (string, error) {
 	output, err := executeCommand(ctx, executor, logger, "ioreg", "-d2", "-c", "IOPlatformExpertDevice")
 	if err != nil {
@@ -122,6 +133,14 @@ func macOSHardwareUUIDViaIOReg(ctx context.Context, executor CommandExecutor, lo
 
 	match := ioregUUIDRe.FindStringSubmatch(output)
 	if len(match) > 1 {
+		if match[1] == nullUUID {
+			if logger != nil {
+				logger.Debug("ioreg returned null UUID")
+			}
+
+			return "", &ParseError{Source: "ioreg output", Err: ErrNotFound}
+		}
+
 		return match[1], nil
 	}
 
@@ -182,6 +201,13 @@ func macOSSerialNumberViaIOReg(ctx context.Context, executor CommandExecutor, lo
 // producing "ChipType:" — this trailing colon is preserved for backward
 // compatibility with existing license activations.
 // Falls back to system_profiler chip_type only if sysctl fails entirely.
+//
+// Known quirk: if machdep.cpu.brand_string succeeds but machdep.cpu.features
+// errors (e.g. transient syscall failure under sandboxing), the result
+// degrades to just cpuBrand instead of "cpuBrand:features". This produces a
+// different hash for the same machine across calls. The divergence is
+// preserved intentionally — changing it would invalidate every existing
+// license activation generated under the current behavior.
 func macOSCPUInfo(ctx context.Context, executor CommandExecutor, logger *slog.Logger) (string, error) {
 	// Primary: sysctl (backward compatible)
 	output, err := executeCommand(ctx, executor, logger, "sysctl", "-n", "machdep.cpu.brand_string")
