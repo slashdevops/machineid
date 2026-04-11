@@ -205,25 +205,31 @@ func parseWmicMultipleValues(output, prefix string) []string {
 }
 
 // parsePowerShellValue extracts a trimmed, non-empty value from PowerShell output.
+// OEM placeholder strings (see biosFirmwareMessage) are rejected with ErrOEMPlaceholder.
 func parsePowerShellValue(output string) (string, error) {
 	value := strings.TrimSpace(output)
 	if value == "" {
 		return "", &ParseError{Source: "PowerShell output", Err: ErrEmptyValue}
+	}
+	if value == biosFirmwareMessage {
+		return "", &ParseError{Source: "PowerShell output", Err: ErrOEMPlaceholder}
 	}
 
 	return value, nil
 }
 
 // parsePowerShellMultipleValues extracts multiple trimmed, non-empty values from PowerShell output.
+// OEM placeholder lines (see biosFirmwareMessage) are filtered out.
 func parsePowerShellMultipleValues(output string) []string {
 	var values []string
 	lines := strings.SplitSeq(output, "\n")
 
 	for line := range lines {
 		value := strings.TrimSpace(line)
-		if value != "" {
-			values = append(values, value)
+		if value == "" || value == biosFirmwareMessage {
+			continue
 		}
+		values = append(values, value)
 	}
 
 	return values
@@ -284,16 +290,7 @@ func windowsMotherboardSerial(ctx context.Context, executor CommandExecutor, log
 		return "", ErrAllMethodsFailed
 	}
 
-	value, parseErr := parsePowerShellValue(psOutput)
-	if parseErr != nil {
-		return "", parseErr
-	}
-
-	if value == biosFirmwareMessage {
-		return "", &ParseError{Source: "PowerShell output", Err: ErrOEMPlaceholder}
-	}
-
-	return value, nil
+	return parsePowerShellValue(psOutput)
 }
 
 // windowsSystemUUID retrieves system UUID using wmic or PowerShell.
