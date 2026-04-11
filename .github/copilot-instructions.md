@@ -33,10 +33,10 @@ Since this is a library build in native go, the files are mostly organized follo
 ## Code Style
 
 - Follow Go's idiomatic style defined in
-  - #fetch https://google.github.io/styleguide/go/guide
-  - #fetch https://google.github.io/styleguide/go/decisions
-  - #fetch https://google.github.io/styleguide/go/best-practices
-  - #fetch https://golang.org/doc/effective_go.html
+  - <https://google.github.io/styleguide/go/guide>
+  - <https://google.github.io/styleguide/go/decisions>
+  - <https://google.github.io/styleguide/go/best-practices>
+  - <https://golang.org/doc/effective_go.html>
 - Use meaningful names for variables, functions, and packages.
 - Keep functions small and focused on a single task.
 - Use comments to explain complex logic or decisions.

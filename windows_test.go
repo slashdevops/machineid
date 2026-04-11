@@ -139,6 +139,20 @@ func TestParsePowerShellValueEmpty(t *testing.T) {
 	}
 }
 
+func TestParsePowerShellValueOEMPlaceholder(t *testing.T) {
+	_, err := parsePowerShellValue("  To be filled by O.E.M.  ")
+	if err == nil {
+		t.Fatal("Expected error for OEM placeholder value")
+	}
+	var parseErr *ParseError
+	if !errors.As(err, &parseErr) {
+		t.Errorf("Expected ParseError, got %T", err)
+	}
+	if !errors.Is(err, ErrOEMPlaceholder) {
+		t.Errorf("Expected ErrOEMPlaceholder, got %v", err)
+	}
+}
+
 // --- parsePowerShellMultipleValues tests ---
 
 func TestParsePowerShellMultipleValuesValid(t *testing.T) {
@@ -162,6 +176,25 @@ func TestParsePowerShellMultipleValuesAllEmpty(t *testing.T) {
 	values := parsePowerShellMultipleValues(output)
 	if len(values) != 0 {
 		t.Errorf("Expected 0 values, got %d", len(values))
+	}
+}
+
+func TestParsePowerShellMultipleValuesFiltersOEM(t *testing.T) {
+	output := "WD-12345\nTo be filled by O.E.M.\nWD-67890\n"
+	values := parsePowerShellMultipleValues(output)
+	if len(values) != 2 {
+		t.Fatalf("Expected 2 values (OEM filtered), got %d: %v", len(values), values)
+	}
+	if values[0] != "WD-12345" || values[1] != "WD-67890" {
+		t.Errorf("Unexpected values: %v", values)
+	}
+}
+
+func TestParsePowerShellMultipleValuesAllOEM(t *testing.T) {
+	output := "To be filled by O.E.M.\nTo be filled by O.E.M.\n"
+	values := parsePowerShellMultipleValues(output)
+	if len(values) != 0 {
+		t.Errorf("Expected 0 values when all OEM, got %d", len(values))
 	}
 }
 
@@ -219,6 +252,34 @@ func TestWindowsCPUIDWmicParseFailFallback(t *testing.T) {
 	}
 	if result != "BFEBFBFF000906EA" {
 		t.Errorf("Expected 'BFEBFBFF000906EA', got %q", result)
+	}
+}
+
+func TestWindowsCPUIDPowerShellOEMPlaceholder(t *testing.T) {
+	mock := newMockExecutor()
+	mock.setError("wmic", fmt.Errorf("wmic not found"))
+	mock.setOutput("powershell", "To be filled by O.E.M.")
+
+	_, err := windowsCPUID(context.Background(), mock, nil)
+	if err == nil {
+		t.Fatal("Expected error for OEM placeholder from PowerShell fallback")
+	}
+	if !errors.Is(err, ErrOEMPlaceholder) {
+		t.Errorf("Expected ErrOEMPlaceholder, got %v", err)
+	}
+}
+
+func TestWindowsCPUIDPowerShellEmpty(t *testing.T) {
+	mock := newMockExecutor()
+	mock.setError("wmic", fmt.Errorf("wmic not found"))
+	mock.setOutput("powershell", "   ")
+
+	_, err := windowsCPUID(context.Background(), mock, nil)
+	if err == nil {
+		t.Fatal("Expected error for empty PowerShell output")
+	}
+	if !errors.Is(err, ErrEmptyValue) {
+		t.Errorf("Expected ErrEmptyValue, got %v", err)
 	}
 }
 
@@ -427,6 +488,19 @@ func TestWindowsSystemUUIDViaPowerShellEmpty(t *testing.T) {
 	}
 }
 
+func TestWindowsSystemUUIDViaPowerShellOEMPlaceholder(t *testing.T) {
+	mock := newMockExecutor()
+	mock.setOutput("powershell", "To be filled by O.E.M.")
+
+	_, err := windowsSystemUUIDViaPowerShell(context.Background(), mock, nil)
+	if err == nil {
+		t.Fatal("Expected error for OEM placeholder from PowerShell")
+	}
+	if !errors.Is(err, ErrOEMPlaceholder) {
+		t.Errorf("Expected ErrOEMPlaceholder, got %v", err)
+	}
+}
+
 // --- windowsDiskSerials tests ---
 
 func TestWindowsDiskSerialsWmicSuccess(t *testing.T) {
@@ -481,6 +555,39 @@ func TestWindowsDiskSerialsPowerShellEmpty(t *testing.T) {
 	_, err := windowsDiskSerials(context.Background(), mock, nil)
 	if err == nil {
 		t.Error("Expected error for empty PowerShell output")
+	}
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("Expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestWindowsDiskSerialsPowerShellFiltersOEM(t *testing.T) {
+	mock := newMockExecutor()
+	mock.setError("wmic", fmt.Errorf("wmic not found"))
+	mock.setOutput("powershell", "WD-12345\nTo be filled by O.E.M.\nWD-67890\n")
+
+	result, err := windowsDiskSerials(context.Background(), mock, nil)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if len(result) != 2 {
+		t.Fatalf("Expected 2 serials (OEM filtered), got %d: %v", len(result), result)
+	}
+	for _, s := range result {
+		if s == "To be filled by O.E.M." {
+			t.Error("OEM placeholder leaked into disk serials")
+		}
+	}
+}
+
+func TestWindowsDiskSerialsPowerShellAllOEM(t *testing.T) {
+	mock := newMockExecutor()
+	mock.setError("wmic", fmt.Errorf("wmic not found"))
+	mock.setOutput("powershell", "To be filled by O.E.M.\nTo be filled by O.E.M.\n")
+
+	_, err := windowsDiskSerials(context.Background(), mock, nil)
+	if err == nil {
+		t.Fatal("Expected error when PowerShell returns only OEM placeholders")
 	}
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("Expected ErrNotFound, got %v", err)

@@ -721,3 +721,173 @@ func TestMacOSCPUInfoAllFailErrorType(t *testing.T) {
 		t.Errorf("Expected ErrAllMethodsFailed, got %v", err)
 	}
 }
+
+// --- Null UUID rejection (D1) ---
+
+// TestMacOSHardwareUUIDRejectsNullFromSystemProfiler verifies that a null UUID
+// from system_profiler triggers the ioreg fallback rather than being accepted.
+func TestMacOSHardwareUUIDRejectsNullFromSystemProfiler(t *testing.T) {
+	mock := newMockExecutor()
+	mock.setOutput("system_profiler", `{
+		"SPHardwareDataType": [{
+			"platform_UUID": "00000000-0000-0000-0000-000000000000",
+			"serial_number": "C02TEST"
+		}]
+	}`)
+	mock.setOutput("ioreg", `"IOPlatformUUID" = "REAL-UUID-FROM-IOREG"`)
+
+	result, err := macOSHardwareUUID(context.Background(), mock, nil)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if result != "REAL-UUID-FROM-IOREG" {
+		t.Errorf("Expected 'REAL-UUID-FROM-IOREG', got %q", result)
+	}
+}
+
+func TestMacOSHardwareUUIDRejectsNullFromSystemProfilerWithLogger(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	mock := newMockExecutor()
+	mock.setOutput("system_profiler", `{
+		"SPHardwareDataType": [{
+			"platform_UUID": "00000000-0000-0000-0000-000000000000"
+		}]
+	}`)
+	mock.setOutput("ioreg", `"IOPlatformUUID" = "REAL-UUID"`)
+
+	if _, err := macOSHardwareUUID(context.Background(), mock, logger); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if !bytes.Contains(buf.Bytes(), []byte("system_profiler returned null UUID")) {
+		t.Error("Expected 'system_profiler returned null UUID' log")
+	}
+}
+
+// TestMacOSHardwareUUIDViaIORegRejectsNull verifies that ioreg null UUIDs
+// return ErrNotFound so no garbage propagates into the machine ID.
+func TestMacOSHardwareUUIDViaIORegRejectsNull(t *testing.T) {
+	mock := newMockExecutor()
+	mock.setOutput("ioreg", `"IOPlatformUUID" = "00000000-0000-0000-0000-000000000000"`)
+
+	_, err := macOSHardwareUUIDViaIOReg(context.Background(), mock, nil)
+	if err == nil {
+		t.Fatal("Expected error for null UUID from ioreg")
+	}
+	var parseErr *ParseError
+	if !errors.As(err, &parseErr) {
+		t.Errorf("Expected ParseError, got %T", err)
+	}
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("Expected ErrNotFound, got %v", err)
+	}
+}
+
+// TestMacOSHardwareUUIDBothNull verifies both sources returning null fails.
+func TestMacOSHardwareUUIDBothNull(t *testing.T) {
+	mock := newMockExecutor()
+	mock.setOutput("system_profiler", `{
+		"SPHardwareDataType": [{
+			"platform_UUID": "00000000-0000-0000-0000-000000000000"
+		}]
+	}`)
+	mock.setOutput("ioreg", `"IOPlatformUUID" = "00000000-0000-0000-0000-000000000000"`)
+
+	_, err := macOSHardwareUUID(context.Background(), mock, nil)
+	if err == nil {
+		t.Fatal("Expected error when both sources return null UUID")
+	}
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("Expected ErrNotFound, got %v", err)
+	}
+}
+
+// --- Apple Silicon CPU path via args-aware mock (D2) ---
+
+// TestMacOSCPUInfoAppleSiliconTrailingColon exercises the exact Apple Silicon
+// production path: brand_string returns the chip name, features returns empty,
+// producing "ChipType:" with a trailing colon that must be preserved for
+// backward compatibility with existing license activations.
+func TestMacOSCPUInfoAppleSiliconTrailingColon(t *testing.T) {
+	mock := newMockExecutor()
+	mock.setOutputForArgs("sysctl", []string{"-n", "machdep.cpu.brand_string"}, "Apple M1 Pro")
+	mock.setOutputForArgs("sysctl", []string{"-n", "machdep.cpu.features"}, "")
+
+	result, err := macOSCPUInfo(context.Background(), mock, nil)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if result != "Apple M1 Pro:" {
+		t.Errorf("Expected 'Apple M1 Pro:' (trailing colon), got %q", result)
+	}
+}
+
+// TestMacOSCPUInfoIntelBrandAndFeatures exercises the Intel production path
+// where both brand_string and features return real data.
+func TestMacOSCPUInfoIntelBrandAndFeatures(t *testing.T) {
+	mock := newMockExecutor()
+	mock.setOutputForArgs("sysctl", []string{"-n", "machdep.cpu.brand_string"}, "Intel(R) Core(TM) i7-9750H")
+	mock.setOutputForArgs("sysctl", []string{"-n", "machdep.cpu.features"}, "FPU VME DE PSE")
+
+	result, err := macOSCPUInfo(context.Background(), mock, nil)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	expected := "Intel(R) Core(TM) i7-9750H:FPU VME DE PSE"
+	if result != expected {
+		t.Errorf("Expected %q, got %q", expected, result)
+	}
+}
+
+// TestMacOSCPUInfoBrandOKFeaturesErrorDegrades documents the D3 quirk: when
+// brand_string succeeds but features errors, the code returns just cpuBrand.
+// This is intentionally preserved for backward compatibility (see the doc
+// comment on macOSCPUInfo) — the test locks in the current behavior so any
+// future change that would break existing license activations fails loudly.
+func TestMacOSCPUInfoBrandOKFeaturesErrorDegrades(t *testing.T) {
+	mock := newMockExecutor()
+	mock.setOutputForArgs("sysctl", []string{"-n", "machdep.cpu.brand_string"}, "Apple M1 Pro")
+	mock.setErrorForArgs("sysctl", []string{"-n", "machdep.cpu.features"}, fmt.Errorf("sandboxed"))
+
+	result, err := macOSCPUInfo(context.Background(), mock, nil)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	// Degraded path: returns cpuBrand without trailing colon.
+	if result != "Apple M1 Pro" {
+		t.Errorf("Expected 'Apple M1 Pro' (degraded path), got %q", result)
+	}
+}
+
+// --- parseStorageJSON edge cases ---
+
+// TestParseStorageJSONMissingInternalField verifies that entries without the
+// is_internal_disk field are treated as non-internal (the current behavior).
+func TestParseStorageJSONMissingInternalField(t *testing.T) {
+	jsonOutput := `{
+		"SPStorageDataType": [
+			{
+				"_name": "Volume",
+				"physical_drive": {
+					"device_name": "SOME DISK"
+				}
+			},
+			{
+				"_name": "Internal",
+				"physical_drive": {
+					"device_name": "APPLE SSD",
+					"is_internal_disk": "yes"
+				}
+			}
+		]
+	}`
+
+	result, err := parseStorageJSON(jsonOutput)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if len(result) != 1 || result[0] != "APPLE SSD" {
+		t.Errorf("Expected [APPLE SSD], got %v", result)
+	}
+}

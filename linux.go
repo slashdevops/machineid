@@ -69,11 +69,14 @@ func linuxCPUID(logger *slog.Logger) (string, error) {
 		logger.Debug("read CPU info", "path", path)
 	}
 
-	return parseCPUInfo(string(data)), nil
+	return parseCPUInfo(string(data))
 }
 
 // parseCPUInfo extracts CPU information from /proc/cpuinfo content.
-func parseCPUInfo(content string) string {
+// Returns ErrNotFound when none of the expected fields are present, so an
+// empty or malformed /proc/cpuinfo does not silently contribute a fixed
+// all-colons string to the machine ID.
+func parseCPUInfo(content string) (string, error) {
 	lines := strings.Split(content, "\n")
 	var processor, vendorID, modelName, flags string
 
@@ -96,8 +99,11 @@ func parseCPUInfo(content string) string {
 		}
 	}
 
-	// Combine CPU information for unique identifier
-	return fmt.Sprintf("%s:%s:%s:%s", processor, vendorID, modelName, flags)
+	if processor == "" && vendorID == "" && modelName == "" && flags == "" {
+		return "", &ParseError{Source: "/proc/cpuinfo", Err: ErrNotFound}
+	}
+
+	return fmt.Sprintf("%s:%s:%s:%s", processor, vendorID, modelName, flags), nil
 }
 
 // linuxSystemUUID retrieves system UUID from DMI.
@@ -171,49 +177,72 @@ func isNonEmpty(value string) bool {
 	return value != ""
 }
 
+// sysBlockDir is the root directory scanned by linuxDiskSerialsSys.
+// It is a variable so tests can inject a fake /sys/block tree.
+var sysBlockDir = "/sys/block"
+
 // linuxDiskSerials retrieves disk serial numbers using various methods.
 // Results are deduplicated across sources to prevent the same serial
-// from appearing multiple times.
+// from appearing multiple times. OEM placeholder strings (see
+// biosFirmwareMessage) are filtered out.
+// Returns ErrNotFound when both backends fail and no valid serial was found.
 func linuxDiskSerials(ctx context.Context, executor CommandExecutor, logger *slog.Logger) ([]string, error) {
 	seen := make(map[string]struct{})
 	var serials []string
 
+	appendValid := func(src []string) {
+		for _, s := range src {
+			if !isValidSerial(s) {
+				continue
+			}
+			if _, exists := seen[s]; exists {
+				continue
+			}
+			seen[s] = struct{}{}
+			serials = append(serials, s)
+		}
+	}
+
+	lsblkErr := error(nil)
+	sysErr := error(nil)
+
 	// Try using lsblk command first
 	if lsblkSerials, err := linuxDiskSerialsLSBLK(ctx, executor, logger); err == nil {
-		for _, s := range lsblkSerials {
-			if _, exists := seen[s]; !exists {
-				seen[s] = struct{}{}
-				serials = append(serials, s)
-			}
-		}
+		appendValid(lsblkSerials)
 
 		if logger != nil {
 			logger.Debug("collected disk serials via lsblk", "count", len(lsblkSerials))
 		}
-	} else if logger != nil {
-		logger.Debug("lsblk failed, trying /sys/block", "error", err)
+	} else {
+		lsblkErr = err
+		if logger != nil {
+			logger.Debug("lsblk failed, trying /sys/block", "error", err)
+		}
 	}
 
 	// Try reading from /sys/block
 	if sysSerials, err := linuxDiskSerialsSys(logger); err == nil {
-		for _, s := range sysSerials {
-			if _, exists := seen[s]; !exists {
-				seen[s] = struct{}{}
-				serials = append(serials, s)
-			}
-		}
+		appendValid(sysSerials)
 
 		if logger != nil {
 			logger.Debug("collected disk serials via /sys/block", "count", len(sysSerials))
 		}
-	} else if logger != nil {
-		logger.Debug("/sys/block read failed", "error", err)
+	} else {
+		sysErr = err
+		if logger != nil {
+			logger.Debug("/sys/block read failed", "error", err)
+		}
+	}
+
+	if len(serials) == 0 && lsblkErr != nil && sysErr != nil {
+		return nil, ErrNotFound
 	}
 
 	return serials, nil
 }
 
 // linuxDiskSerialsLSBLK retrieves disk serials using lsblk command.
+// OEM placeholder strings are filtered out.
 func linuxDiskSerialsLSBLK(ctx context.Context, executor CommandExecutor, logger *slog.Logger) ([]string, error) {
 	output, err := executeCommand(ctx, executor, logger, "lsblk", "-d", "-n", "-o", "SERIAL")
 	if err != nil {
@@ -224,35 +253,37 @@ func linuxDiskSerialsLSBLK(ctx context.Context, executor CommandExecutor, logger
 	lines := strings.SplitSeq(output, "\n")
 	for line := range lines {
 		serial := strings.TrimSpace(line)
-		if serial != "" {
-			serials = append(serials, serial)
+		if !isValidSerial(serial) {
+			continue
 		}
+		serials = append(serials, serial)
 	}
 
 	return serials, nil
 }
 
 // linuxDiskSerialsSys retrieves disk serials from /sys/block.
+// OEM placeholder strings are filtered out.
 func linuxDiskSerialsSys(logger *slog.Logger) ([]string, error) {
 	var serials []string
 
-	blockDir := "/sys/block"
-	entries, err := os.ReadDir(blockDir)
+	entries, err := os.ReadDir(sysBlockDir)
 	if err != nil {
 		return nil, err
 	}
 
 	for _, entry := range entries {
 		if entry.IsDir() && !strings.HasPrefix(entry.Name(), "loop") {
-			serialFile := filepath.Join(blockDir, entry.Name(), "device", "serial")
+			serialFile := filepath.Join(sysBlockDir, entry.Name(), "device", "serial")
 			if data, err := os.ReadFile(serialFile); err == nil {
 				serial := strings.TrimSpace(string(data))
-				if serial != "" {
-					serials = append(serials, serial)
+				if !isValidSerial(serial) {
+					continue
+				}
+				serials = append(serials, serial)
 
-					if logger != nil {
-						logger.Debug("read disk serial from sysfs", "disk", entry.Name(), "path", serialFile)
-					}
+				if logger != nil {
+					logger.Debug("read disk serial from sysfs", "disk", entry.Name(), "path", serialFile)
 				}
 			}
 		}
