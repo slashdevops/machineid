@@ -168,7 +168,7 @@ func (u *Updater) plan(ctx context.Context, method Method, report Report, opts O
 		return plan, nil
 	}
 
-	plan.Asset = u.chooseReleaseAsset(ctx, report, opts, tag)
+	plan.Asset = u.chooseReleaseAsset(ctx, report, tag)
 
 	exists, err := u.Client.AssetExists(ctx, tag, plan.Asset.Name)
 	if err != nil {
@@ -183,10 +183,13 @@ func (u *Updater) plan(ctx context.Context, method Method, report Report, opts O
 
 // chooseReleaseAsset picks the package on macOS only when the running binary
 // lives where the package installs; otherwise the universal zip updates the
-// binary in place when the release carries it.
-func (u *Updater) chooseReleaseAsset(ctx context.Context, report Report, opts Options, tag string) Asset {
+// binary in place when the release carries it. -force does not change the
+// choice: reinstalling an equal version in place must not suddenly require
+// root. Only when the release has no zip does -force fall through to the
+// package, which then installs to PkgInstallDir as the target guard states.
+func (u *Updater) chooseReleaseAsset(ctx context.Context, report Report, tag string) Asset {
 	asset := report.ReleaseAsset
-	if asset.Kind != KindPkg || opts.Force || sameDir(filepath.Dir(report.ExecutablePath), PkgInstallDir) {
+	if asset.Kind != KindPkg || sameDir(filepath.Dir(report.ExecutablePath), PkgInstallDir) {
 		return asset
 	}
 

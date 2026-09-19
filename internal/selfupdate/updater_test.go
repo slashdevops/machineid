@@ -311,6 +311,32 @@ func TestUpdaterDarwinZipWhenNotInUsrLocalBin(t *testing.T) {
 	}
 }
 
+// TestUpdaterDarwinForceReinstallsInPlace covers `update -force -version <same>`
+// from a go-installed copy: the universal zip must be used in place, without
+// root and without the installer. Found by the first real run against v0.2.0.
+func TestUpdaterDarwinForceReinstallsInPlace(t *testing.T) {
+	rig := newRig(t, "darwin", "v0.2.0")
+	z := DarwinZipAsset()
+	rig.gh.addArchive("v0.2.0", z.Name, z.ChecksumName, z.InnerName, []byte("same-version-fresh-copy"))
+	rig.gh.addAsset("v0.2.0", "machineid-darwin-universal.pkg", []byte("pkg"))
+	rig.exec.on("codesign --verify", ExecResult{})
+	rig.exec.on(rig.target+" -version", ExecResult{Stdout: "machineid v0.2.0"})
+
+	res, err := rig.u.Run(context.Background(), Options{CurrentVersion: "v0.2.0", Version: "v0.2.0", Force: true, AssumeYes: true})
+	if err != nil {
+		t.Fatalf("%v\n%s", err, rig.out.String())
+	}
+	if !res.Changed {
+		t.Errorf("-force should reinstall an equal version: %+v", res)
+	}
+	if got := mustRead(t, rig.target); string(got) != "same-version-fresh-copy" {
+		t.Errorf("target = %q", got)
+	}
+	if rig.exec.called("installer -pkg") {
+		t.Error("the package must not be used when the zip exists, even with -force")
+	}
+}
+
 func TestUpdaterDarwinNoZipRefusesOutsidePkgDir(t *testing.T) {
 	rig := newRig(t, "darwin", "v0.3.0")
 	rig.gh.addAsset("v0.3.0", "machineid-darwin-universal.pkg", []byte("pkg"))
