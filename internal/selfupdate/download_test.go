@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -104,7 +105,7 @@ func TestExtractBinary(t *testing.T) {
 		t.Errorf("extracted %q", got)
 	}
 	info := mustStat(t, out)
-	if info.Mode().Perm()&0o100 == 0 {
+	if runtime.GOOS != "windows" && info.Mode().Perm()&0o100 == 0 {
 		t.Error("extracted binary should be executable")
 	}
 }

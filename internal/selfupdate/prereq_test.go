@@ -11,7 +11,7 @@ import (
 // binary; gobin is what `go env` reports; uid 0 means root.
 func newTestChecker(goos, exe, gobin string, uid int, fe *fakeExec) *Checker {
 	fe.on("go version", ExecResult{Stdout: "go version go1.27.1 " + goos + "/arm64"})
-	fe.on("go env GOBIN GOPATH", ExecResult{Stdout: "\n" + filepath.Dir(gobin) + "\n"})
+	fe.on("go env GOBIN GOPATH", ExecResult{Stdout: gobin + "\n" + filepath.Dir(gobin) + "\n"})
 
 	return &Checker{
 		Exec:           fe.run,
@@ -182,5 +182,20 @@ func TestGoBinDirPrefersGOBIN(t *testing.T) {
 	dir, err := c.goBinDir(context.Background())
 	if err != nil || dir != "/custom/bin" {
 		t.Errorf("got %q, %v", dir, err)
+	}
+}
+
+func TestGoBinDirFallsBackToGOPATH(t *testing.T) {
+	fe := newFakeExec()
+	fe.on("go env GOBIN GOPATH", ExecResult{Stdout: "\n/home/u/go\n"})
+	c := &Checker{Exec: fe.run}
+	dir, err := c.goBinDir(context.Background())
+	if err != nil || dir != filepath.Join("/home/u/go", "bin") {
+		t.Errorf("got %q, %v", dir, err)
+	}
+
+	fe.on("go env GOBIN GOPATH", ExecResult{Stdout: "\n\n"})
+	if _, err := c.goBinDir(context.Background()); err == nil {
+		t.Error("empty GOPATH should be an error")
 	}
 }

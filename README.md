@@ -116,7 +116,7 @@ unzip machineid.zip && sudo install -m 0755 machineid /usr/local/bin/machineid
 
 **🪟 Windows**: use `go install` above or build from source. Pre-built Windows binaries are not published yet.
 
-How to verify a download: [macOS signing and notarization](docs/macos-signing.md) and [Linux Sigstore verification](docs/linux-signing.md).
+How to verify a download: [macOS signing and notarization](docs/macos-signing.md) and [Linux Sigstore verification](docs/linux-signing.md). Already installed? See [Updating the CLI](#️-updating-the-cli).
 
 #### From source
 
@@ -131,10 +131,12 @@ make build
 
 ## ⬆️ Updating the CLI
 
-Once installed, the CLI updates itself:
+Once installed, the CLI updates itself. Full guide with per-platform details, script recipes and a troubleshooting table: **[docs/updating.md](docs/updating.md)**.
 
 ```bash
-machineid update
+machineid update            # check, show the plan, ask, install
+machineid update -check     # what would happen, nothing changes
+machineid update -yes       # non-interactive (sudo on macOS for the .pkg)
 ```
 
 It looks up the newest release, shows a checklist and the plan, asks for confirmation, downloads the asset for your platform, verifies its SHA-256 and signature, and replaces the binary you are running. Nothing is downloaded until every check has passed. Root is never requested; where it is needed (the macOS package) the exact `sudo` command is printed.
