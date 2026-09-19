@@ -7,7 +7,6 @@
 [![CodeQL](https://github.com/slashdevops/machineid/actions/workflows/codeql.yml/badge.svg)](https://github.com/slashdevops/machineid/actions/workflows/codeql.yml)
 [![Go version](https://img.shields.io/github/go-mod/go-version/slashdevops/machineid)](go.mod)
 [![Go Reference](https://pkg.go.dev/badge/github.com/slashdevops/machineid.svg)](https://pkg.go.dev/github.com/slashdevops/machineid)
-[![Go Report Card](https://goreportcard.com/badge/github.com/slashdevops/machineid)](https://goreportcard.com/report/github.com/slashdevops/machineid)
 [![Latest release](https://img.shields.io/github/v/release/slashdevops/machineid?sort=semver)](https://github.com/slashdevops/machineid/releases/latest)
 [![License](https://img.shields.io/github/license/slashdevops/machineid.svg)](LICENSE)
 
