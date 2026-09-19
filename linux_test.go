@@ -29,7 +29,56 @@ flags		: fpu vme de pse tsc msr pae mce
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
-	expected := "0:GenuineIntel:Intel(R) Core(TM) i7-9750H CPU @ 2.60GHz:fpu vme de pse tsc msr pae mce"
+	expected := "GenuineIntel:Intel(R) Core(TM) i7-9750H CPU @ 2.60GHz"
+	if result != expected {
+		t.Errorf("Expected %q, got %q", expected, result)
+	}
+}
+
+// TestParseCPUInfoIgnoresVolatileFields verifies that the flags line and the
+// processor index do not contribute: a kernel or microcode update that adds
+// a mitigation flag, or a VM resize, must not change the identifier.
+func TestParseCPUInfoIgnoresVolatileFields(t *testing.T) {
+	before := "processor\t: 0\nvendor_id\t: GenuineIntel\nmodel name\t: Intel Core i7\nflags\t\t: fpu vme\n"
+	after := "processor\t: 7\nvendor_id\t: GenuineIntel\nmodel name\t: Intel Core i7\nflags\t\t: fpu vme md_clear flush_l1d\n"
+
+	a, err := parseCPUInfo(before)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := parseCPUInfo(after)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a != b {
+		t.Errorf("identifier changed with flags/processor index: %q vs %q", a, b)
+	}
+}
+
+// TestParseCPUInfoARM covers aarch64 kernels, which have no vendor_id or
+// model name and describe the CPU with implementer/part/variant/revision.
+func TestParseCPUInfoARM(t *testing.T) {
+	content := `processor	: 0
+BogoMIPS	: 108.00
+Features	: fp asimd evtstrm crc32 cpuid
+CPU implementer	: 0x41
+CPU architecture: 8
+CPU variant	: 0x0
+CPU part	: 0xd08
+CPU revision	: 3
+
+processor	: 1
+BogoMIPS	: 108.00
+CPU implementer	: 0x41
+CPU part	: 0xd08
+CPU revision	: 3
+Hardware	: BCM2835
+`
+	result, err := parseCPUInfo(content)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	expected := "0x41:0xd08/0x0/3:BCM2835"
 	if result != expected {
 		t.Errorf("Expected %q, got %q", expected, result)
 	}
@@ -57,7 +106,7 @@ model name	: AMD Ryzen 9 5950X
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
-	expected := "3:AuthenticAMD:AMD Ryzen 9 5950X:"
+	expected := "AuthenticAMD:AMD Ryzen 9 5950X"
 	if result != expected {
 		t.Errorf("Expected %q, got %q", expected, result)
 	}
@@ -87,7 +136,7 @@ func TestParseCPUInfoUnknownFieldsOnly(t *testing.T) {
 }
 
 func TestParseCPUInfoMultipleProcessors(t *testing.T) {
-	// parseCPUInfo keeps overwriting, so the last processor block wins
+	// Every core repeats the same vendor and model; the first block is used.
 	content := `processor	: 0
 vendor_id	: GenuineIntel
 model name	: Intel Core i7
@@ -102,8 +151,7 @@ flags		: fpu vme avx
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
-	// Last processor's values should win
-	expected := "1:GenuineIntel:Intel Core i7:fpu vme avx"
+	expected := "GenuineIntel:Intel Core i7"
 	if result != expected {
 		t.Errorf("Expected %q, got %q", expected, result)
 	}
@@ -147,7 +195,7 @@ func TestIsNonEmpty(t *testing.T) {
 
 func TestLinuxDiskSerialsLSBLKSuccess(t *testing.T) {
 	mock := newMockExecutor()
-	mock.setOutput("lsblk", "WD-12345\nSAMSUNG-67890\n")
+	mock.setOutput("lsblk", lsblkLine("sda", "disk", "0", "WD-12345")+lsblkLine("nvme0n1", "disk", "0", "SAMSUNG-67890"))
 
 	serials, err := linuxDiskSerialsLSBLK(context.Background(), mock, nil)
 	if err != nil {
@@ -186,7 +234,7 @@ func TestLinuxDiskSerialsLSBLKError(t *testing.T) {
 
 func TestLinuxDiskSerialsLSBLKSkipsEmpty(t *testing.T) {
 	mock := newMockExecutor()
-	mock.setOutput("lsblk", "WD-12345\n\n\nSAMSUNG-67890\n")
+	mock.setOutput("lsblk", lsblkLine("sda", "disk", "0", "WD-12345")+"\n\n"+lsblkLine("sdb", "disk", "0", "SAMSUNG-67890"))
 
 	serials, err := linuxDiskSerialsLSBLK(context.Background(), mock, nil)
 	if err != nil {
@@ -199,7 +247,7 @@ func TestLinuxDiskSerialsLSBLKSkipsEmpty(t *testing.T) {
 
 func TestLinuxDiskSerialsLSBLKFiltersOEM(t *testing.T) {
 	mock := newMockExecutor()
-	mock.setOutput("lsblk", "WD-12345\nTo be filled by O.E.M.\nSAMSUNG-67890\n")
+	mock.setOutput("lsblk", lsblkLine("sda", "disk", "0", "WD-12345")+lsblkLine("sdb", "disk", "0", "To be filled by O.E.M.")+lsblkLine("sdc", "disk", "0", "SAMSUNG-67890"))
 
 	serials, err := linuxDiskSerialsLSBLK(context.Background(), mock, nil)
 	if err != nil {
@@ -213,6 +261,42 @@ func TestLinuxDiskSerialsLSBLKFiltersOEM(t *testing.T) {
 			t.Error("OEM placeholder leaked into lsblk disk serials")
 		}
 	}
+}
+
+// TestLinuxDiskSerialsLSBLKSkipsRemovableAndNonDisk verifies that USB sticks,
+// optical drives and loop devices never contribute: plugging one in must not
+// change the machine ID.
+func TestLinuxDiskSerialsLSBLKSkipsRemovableAndNonDisk(t *testing.T) {
+	mock := newMockExecutor()
+	mock.setOutput("lsblk",
+		lsblkLine("sda", "disk", "0", "FIXED-1")+
+			lsblkLine("sdb", "disk", "1", "USB-STICK")+
+			lsblkLine("sr0", "rom", "1", "DVD-DRIVE")+
+			lsblkLine("loop0", "loop", "0", "")+
+			lsblkLine("nvme0n1", "disk", "0", "FIXED-2"))
+
+	serials, err := linuxDiskSerialsLSBLK(context.Background(), mock, nil)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if len(serials) != 2 || serials[0] != "FIXED-1" || serials[1] != "FIXED-2" {
+		t.Errorf("Expected [FIXED-1 FIXED-2], got %v", serials)
+	}
+}
+
+func TestParseKeyValueLine(t *testing.T) {
+	got := parseKeyValueLine(`NAME="sda" TYPE="disk" RM="0" SERIAL="S/N with spaces"`)
+	if got["NAME"] != "sda" || got["TYPE"] != "disk" || got["RM"] != "0" || got["SERIAL"] != "S/N with spaces" {
+		t.Errorf("parseKeyValueLine = %v", got)
+	}
+	if len(parseKeyValueLine("")) != 0 || len(parseKeyValueLine("garbage")) != 0 {
+		t.Error("non key=value input should yield no fields")
+	}
+}
+
+// lsblkLine renders one line of `lsblk -P -o NAME,TYPE,RM,SERIAL` output.
+func lsblkLine(name, typ, rm, serial string) string {
+	return fmt.Sprintf("NAME=%q TYPE=%q RM=%q SERIAL=%q\n", name, typ, rm, serial)
 }
 
 // --- linuxDiskSerialsSys tests (with injected sysBlockDir) ---
@@ -267,6 +351,36 @@ func TestLinuxDiskSerialsSysSkipsLoop(t *testing.T) {
 	}
 }
 
+func TestLinuxDiskSerialsSysSkipsVirtualAndRemovable(t *testing.T) {
+	tmp := t.TempDir()
+	withSysBlockDir(t, tmp)
+
+	writeFakeDisk(t, tmp, "sda", "FIXED\n")
+	for _, name := range []string{"ram0", "zram0", "dm-0", "md127", "sr0", "fd0", "nbd0", "mtdblock0"} {
+		writeFakeDisk(t, tmp, name, "VIRTUAL-"+name+"\n")
+	}
+	writeFakeDisk(t, tmp, "sdb", "USB-STICK\n")
+	writeFakeRemovable(t, tmp, "sdb", "1\n")
+	writeFakeDisk(t, tmp, "sdc", "FIXED-EXPLICIT\n")
+	writeFakeRemovable(t, tmp, "sdc", "0\n")
+
+	serials, err := linuxDiskSerialsSys(nil)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if len(serials) != 2 || serials[0] != "FIXED" || serials[1] != "FIXED-EXPLICIT" {
+		t.Errorf("Expected [FIXED FIXED-EXPLICIT], got %v", serials)
+	}
+}
+
+// writeFakeRemovable writes /sys/block/<name>/removable.
+func writeFakeRemovable(t *testing.T, root, name, value string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(root, name, "removable"), []byte(value), 0o644); err != nil {
+		t.Fatalf("write removable %q: %v", name, err)
+	}
+}
+
 func TestLinuxDiskSerialsSysFiltersOEMAndEmpty(t *testing.T) {
 	tmp := t.TempDir()
 	withSysBlockDir(t, tmp)
@@ -314,7 +428,7 @@ func TestLinuxDiskSerialsPartialSuccess(t *testing.T) {
 	// lsblk succeeds, /sys/block missing → no error, lsblk results returned.
 	withSysBlockDir(t, filepath.Join(t.TempDir(), "nope"))
 	mock := newMockExecutor()
-	mock.setOutput("lsblk", "SERIAL-X\n")
+	mock.setOutput("lsblk", lsblkLine("sda", "disk", "0", "SERIAL-X"))
 
 	serials, err := linuxDiskSerials(context.Background(), mock, nil)
 	if err != nil {
@@ -332,7 +446,7 @@ func TestLinuxDiskSerialsDeduplicatesAcrossBackends(t *testing.T) {
 	writeFakeDisk(t, tmp, "sdb", "ONLY-SYS\n")
 
 	mock := newMockExecutor()
-	mock.setOutput("lsblk", "SHARED\nONLY-LSBLK\n")
+	mock.setOutput("lsblk", lsblkLine("sda", "disk", "0", "SHARED")+lsblkLine("sdb", "disk", "0", "ONLY-LSBLK"))
 
 	serials, err := linuxDiskSerials(context.Background(), mock, nil)
 	if err != nil {
@@ -359,7 +473,7 @@ func TestLinuxDiskSerialsFiltersOEMAcrossBackends(t *testing.T) {
 	writeFakeDisk(t, tmp, "sda", "GOOD-SYS\n")
 
 	mock := newMockExecutor()
-	mock.setOutput("lsblk", "GOOD-LSBLK\nTo be filled by O.E.M.\n")
+	mock.setOutput("lsblk", lsblkLine("sda", "disk", "0", "GOOD-LSBLK")+lsblkLine("sdb", "disk", "0", "To be filled by O.E.M."))
 
 	serials, err := linuxDiskSerials(context.Background(), mock, nil)
 	if err != nil {
@@ -422,7 +536,7 @@ func TestReadFirstValidFromLocationsSkipsInvalid(t *testing.T) {
 
 func TestLinuxDiskSerialsDeduplicated(t *testing.T) {
 	mock := newMockExecutor()
-	mock.setOutput("lsblk", "SERIAL-A\nSERIAL-B\n")
+	mock.setOutput("lsblk", lsblkLine("sda", "disk", "0", "SERIAL-A")+lsblkLine("sdb", "disk", "0", "SERIAL-B"))
 
 	serials, err := linuxDiskSerials(context.Background(), mock, nil)
 	if err != nil {
@@ -437,7 +551,7 @@ func TestLinuxDiskSerialsWithLogger(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
 	mock := newMockExecutor()
-	mock.setOutput("lsblk", "SERIAL-LOG\n")
+	mock.setOutput("lsblk", lsblkLine("sda", "disk", "0", "SERIAL-LOG"))
 
 	_, err := linuxDiskSerials(context.Background(), mock, logger)
 	if err != nil {
@@ -452,7 +566,7 @@ func TestLinuxDiskSerialsWithLogger(t *testing.T) {
 
 func TestProviderWithMockExecutor(t *testing.T) {
 	mock := newMockExecutor()
-	mock.setOutput("lsblk", "SERIAL-A\n")
+	mock.setOutput("lsblk", lsblkLine("sda", "disk", "0", "SERIAL-A"))
 
 	p := New().WithExecutor(mock).WithDisk()
 
@@ -479,7 +593,7 @@ func TestProviderErrorHandlingLinux(t *testing.T) {
 
 func TestProviderDiagnosticsLinux(t *testing.T) {
 	mock := newMockExecutor()
-	mock.setOutput("lsblk", "SERIAL\n")
+	mock.setOutput("lsblk", lsblkLine("sda", "disk", "0", "SERIAL"))
 
 	p := New().WithExecutor(mock).WithDisk()
 
@@ -503,7 +617,7 @@ func TestProviderWithLoggerLinux(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
 	mock := newMockExecutor()
-	mock.setOutput("lsblk", "SERIAL\n")
+	mock.setOutput("lsblk", lsblkLine("sda", "disk", "0", "SERIAL"))
 
 	p := New().WithExecutor(mock).WithLogger(logger).WithDisk()
 
@@ -519,7 +633,7 @@ func TestProviderWithLoggerLinux(t *testing.T) {
 
 func TestProviderValidateLinux(t *testing.T) {
 	mock := newMockExecutor()
-	mock.setOutput("lsblk", "SERIAL\n")
+	mock.setOutput("lsblk", lsblkLine("sda", "disk", "0", "SERIAL"))
 
 	p := New().WithExecutor(mock).WithDisk()
 
@@ -592,7 +706,7 @@ func TestValidateErrorLinux(t *testing.T) {
 
 func TestProviderCachedIDLinux(t *testing.T) {
 	mock := newMockExecutor()
-	mock.setOutput("lsblk", "SERIAL1\n")
+	mock.setOutput("lsblk", lsblkLine("sda", "disk", "0", "SERIAL1"))
 
 	p := New().WithExecutor(mock).WithDisk()
 
@@ -601,7 +715,7 @@ func TestProviderCachedIDLinux(t *testing.T) {
 		t.Fatalf("First ID() error: %v", err)
 	}
 
-	mock.setOutput("lsblk", "SERIAL2\n")
+	mock.setOutput("lsblk", lsblkLine("sda", "disk", "0", "SERIAL2"))
 
 	id2, err := p.ID(context.Background())
 	if err != nil {
