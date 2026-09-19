@@ -33,14 +33,21 @@ var (
 )
 
 // CommandError records a failed system command execution.
-// Use [errors.As] to extract the command name from wrapped errors.
+// Use [errors.AsType] to extract the command name from wrapped errors.
+// When the command was ended by a timeout or cancellation, Err wraps
+// [context.DeadlineExceeded] or [context.Canceled].
 type CommandError struct {
 	Err     error  // underlying error from exec
 	Command string // command name, e.g. "sysctl", "ioreg", "wmic"
+	Stderr  string // first line of the command's stderr, if any
 }
 
 // Error returns a human-readable description of the command failure.
 func (e *CommandError) Error() string {
+	if e.Stderr != "" {
+		return fmt.Sprintf("command %q failed: %v (stderr: %s)", e.Command, e.Err, e.Stderr)
+	}
+
 	return fmt.Sprintf("command %q failed: %v", e.Command, e.Err)
 }
 
@@ -50,7 +57,7 @@ func (e *CommandError) Unwrap() error {
 }
 
 // ParseError records a failure while parsing command or system output.
-// Use [errors.As] to extract the source from wrapped errors.
+// Use [errors.AsType] to extract the source from wrapped errors.
 type ParseError struct {
 	Err    error  // underlying parse error
 	Source string // data source, e.g. "system_profiler JSON", "wmic output"
@@ -67,7 +74,7 @@ func (e *ParseError) Unwrap() error {
 }
 
 // ComponentError records a failure while collecting a specific hardware component.
-// These errors appear in [DiagnosticInfo.Errors] and can be inspected with [errors.As].
+// These errors appear in [DiagnosticInfo.Errors] and can be inspected with [errors.AsType].
 type ComponentError struct {
 	Err       error  // underlying error
 	Component string // component name, e.g. "cpu", "uuid", "disk"

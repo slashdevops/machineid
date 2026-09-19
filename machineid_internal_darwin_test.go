@@ -126,7 +126,7 @@ func TestDiagnosticsAvailableAfterID(t *testing.T) {
 		"SPHardwareDataType": [{
 			"chip_type": "Apple M1",
 			"machine_model": "Mac",
-			"platform_UUID": "UUID-123",
+			"platform_UUID": "E1B2C3D4-0007-4A5B-8C6D-7E8F9A0B1C2D",
 			"serial_number": "SERIAL"
 		}]
 	}`)

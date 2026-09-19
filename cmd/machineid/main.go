@@ -1,3 +1,17 @@
+// Command machineid prints a deterministic, hardware-derived identifier for
+// the current machine.
+//
+// With no component flags it combines the CPU, motherboard serial and system
+// UUID. Any subset can be selected with -cpu, -motherboard, -uuid, -mac and
+// -disk; -all selects everything and -vm selects the VM-safe subset
+// (CPU + UUID). The output length is chosen with -format (32, 64, 128 or
+// 256 hex characters) and -salt mixes an application-specific string into
+// the hash. -validate compares a stored ID against the current machine,
+// -json and -diagnostics control the output, and -verbose or -debug write
+// logs to stderr.
+//
+// Exit codes: 0 success, 1 generation or validation failed, 2 invalid
+// arguments. Run machineid -h for the full flag list.
 package main
 
 import (
@@ -7,9 +21,11 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/signal"
 	"runtime"
 	"runtime/debug"
 	"strings"
+	"syscall"
 
 	"github.com/slashdevops/machineid"
 	"github.com/slashdevops/machineid/internal/version"
@@ -21,7 +37,7 @@ func main() {
 	// Hardware component flags
 	cpu := flag.Bool("cpu", false, "Include CPU identifier")
 	motherboard := flag.Bool("motherboard", false, "Include motherboard serial number")
-	uuid := flag.Bool("uuid", false, "Include system UUID (BIOS/UEFI)")
+	sysUUID := flag.Bool("uuid", false, "Include system UUID (BIOS/UEFI)")
 	mac := flag.Bool("mac", false, "Include network interface MAC addresses")
 	macFilterFlag := flag.String("mac-filter", "physical", "MAC address filter: physical, all, or virtual (requires -mac or -all)")
 	disk := flag.Bool("disk", false, "Include disk serial numbers")
@@ -99,7 +115,7 @@ func main() {
 	case *all:
 		provider.WithCPU().WithMotherboard().WithSystemUUID().WithMAC(mFilter).WithDisk()
 	default:
-		if !*cpu && !*motherboard && !*uuid && !*mac && !*disk {
+		if !*cpu && !*motherboard && !*sysUUID && !*mac && !*disk {
 			// Default: CPU + Motherboard + System UUID
 			provider.WithCPU().WithMotherboard().WithSystemUUID()
 		} else {
@@ -109,7 +125,7 @@ func main() {
 			if *motherboard {
 				provider.WithMotherboard()
 			}
-			if *uuid {
+			if *sysUUID {
 				provider.WithSystemUUID()
 			}
 			if *mac {
@@ -121,8 +137,10 @@ func main() {
 		}
 	}
 
-	// Generate machine ID
-	ctx := context.Background()
+	// Generate machine ID. Ctrl-C or SIGTERM cancels the context so any
+	// in-flight system command is killed instead of orphaned.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	id, err := provider.ID(ctx)
 	if err != nil {

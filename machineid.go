@@ -5,8 +5,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"log/slog"
+	"maps"
 	"runtime"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -74,7 +75,8 @@ type DiagnosticInfo struct {
 
 // CommandExecutor is an interface for executing system commands, allowing for
 // dependency injection and testing. Implementations must be safe for concurrent
-// use, since Windows collects hardware identifiers in parallel goroutines.
+// use, since hardware identifiers are collected in parallel goroutines on
+// every platform.
 type CommandExecutor interface {
 	Execute(ctx context.Context, name string, args ...string) (string, error)
 }
@@ -167,9 +169,12 @@ func (p *Provider) WithDisk() *Provider {
 }
 
 // WithExecutor sets a custom [CommandExecutor], enabling deterministic testing
-// without real system commands.
+// without real system commands. A nil executor is ignored and the current
+// executor is kept.
 func (p *Provider) WithExecutor(executor CommandExecutor) *Provider {
-	p.commandExecutor = executor
+	if executor != nil {
+		p.commandExecutor = executor
+	}
 
 	return p
 }
@@ -202,7 +207,8 @@ func (p *Provider) VMFriendly() *Provider {
 // It caches the result, so subsequent calls return the same ID.
 // The configuration is frozen after the first successful call.
 // The provided context controls the timeout and cancellation of any
-// system commands executed during hardware identifier collection.
+// system commands executed during hardware identifier collection; a
+// context that is already done returns its error without collecting.
 // This method is safe for concurrent use.
 func (p *Provider) ID(ctx context.Context) (string, error) {
 	p.mu.Lock()
@@ -212,6 +218,10 @@ func (p *Provider) ID(ctx context.Context) (string, error) {
 		p.logDebug("returning cached machine ID")
 
 		return p.cachedID, nil
+	}
+
+	if err := ctx.Err(); err != nil {
+		return "", err
 	}
 
 	p.logInfo("generating machine ID",
@@ -251,12 +261,20 @@ func (p *Provider) ID(ctx context.Context) (string, error) {
 
 // Diagnostics returns information about which hardware components were
 // successfully collected and which ones failed during the last call to [ID].
-// Returns nil if [ID] has not been called yet.
+// Returns nil if [ID] has not been called yet. The returned value is a copy;
+// modifying it does not affect the provider.
 func (p *Provider) Diagnostics() *DiagnosticInfo {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	return p.diagnostics
+	if p.diagnostics == nil {
+		return nil
+	}
+
+	return &DiagnosticInfo{
+		Errors:    maps.Clone(p.diagnostics.Errors),
+		Collected: slices.Clone(p.diagnostics.Collected),
+	}
 }
 
 // Validate reports whether the provided ID matches the current machine ID.
@@ -272,9 +290,9 @@ func (p *Provider) Validate(ctx context.Context, id string) (bool, error) {
 
 // hashIdentifiers processes and hashes the hardware identifiers with optional salt.
 // Returns a hash formatted according to the specified [FormatMode].
+// The input slice is not modified.
 func hashIdentifiers(identifiers []string, salt string, mode FormatMode) string {
-	sort.Strings(identifiers)
-	combined := strings.Join(identifiers, "|")
+	combined := strings.Join(slices.Sorted(slices.Values(identifiers)), "|")
 	if salt != "" {
 		combined = salt + "|" + combined
 	}

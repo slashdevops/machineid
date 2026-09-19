@@ -80,10 +80,7 @@ linters:
         - (io.Writer).Write
         - io.ReadAll
         - filepath.Match
-        - github.com/spf13/viper.BindPFlag
-        - (*github.com/spf13/cobra.Command).MarkFlagRequired
-        - (*github.com/spf13/pflag.FlagSet).GetString
-        - (*github.com/spf13/pflag.FlagSet).GetInt
-        - (*github.com/spf13/pflag.FlagSet).GetBool
         - encoding/json.Marshal
         - encoding/hex.DecodeString
+        # errors.AsType[T] returns (T, bool); errcheck misreads T as an error result when T implements error.
+        - errors.AsType

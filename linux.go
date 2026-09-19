@@ -11,45 +11,57 @@ import (
 	"strings"
 )
 
-// collectIdentifiers gathers Linux-specific hardware identifiers based on provider config.
+// collectIdentifiers gathers Linux-specific hardware identifiers concurrently.
+// Most sources are sysfs and procfs reads; running them alongside the lsblk
+// process keeps the disk lookup off the critical path.
 func collectIdentifiers(ctx context.Context, p *Provider, diag *DiagnosticInfo) ([]string, error) {
-	var identifiers []string
 	logger := p.logger
+	executor := p.commandExecutor
+
+	var tasks []componentTask
 
 	if p.includeCPU {
-		identifiers = appendIdentifierIfValid(identifiers, func() (string, error) {
-			return linuxCPUID(logger)
-		}, "cpu:", diag, ComponentCPU, logger)
+		tasks = append(tasks, componentTask{component: ComponentCPU, prefix: "cpu:",
+			single: func(context.Context) (string, error) {
+				return linuxCPUID(logger)
+			}})
 	}
 
 	if p.includeSystemUUID {
-		identifiers = appendIdentifierIfValid(identifiers, func() (string, error) {
-			return linuxSystemUUID(logger)
-		}, "uuid:", diag, ComponentSystemUUID, logger)
-		identifiers = appendIdentifierIfValid(identifiers, func() (string, error) {
-			return linuxMachineID(logger)
-		}, "machine:", diag, ComponentMachineID, logger)
+		tasks = append(tasks,
+			componentTask{component: ComponentSystemUUID, prefix: "uuid:",
+				single: func(context.Context) (string, error) {
+					return linuxSystemUUID(logger)
+				}},
+			componentTask{component: ComponentMachineID, prefix: "machine:",
+				single: func(context.Context) (string, error) {
+					return linuxMachineID(logger)
+				}},
+		)
 	}
 
 	if p.includeMotherboard {
-		identifiers = appendIdentifierIfValid(identifiers, func() (string, error) {
-			return linuxMotherboardSerial(logger)
-		}, "mb:", diag, ComponentMotherboard, logger)
+		tasks = append(tasks, componentTask{component: ComponentMotherboard, prefix: "mb:",
+			single: func(context.Context) (string, error) {
+				return linuxMotherboardSerial(logger)
+			}})
 	}
 
 	if p.includeMAC {
-		identifiers = appendIdentifiersIfValid(identifiers, func() ([]string, error) {
-			return collectMACAddresses(p.macFilter, logger)
-		}, "mac:", diag, ComponentMAC, logger)
+		tasks = append(tasks, componentTask{component: ComponentMAC, prefix: "mac:",
+			multi: func(context.Context) ([]string, error) {
+				return collectMACAddresses(p.macFilter, logger)
+			}})
 	}
 
 	if p.includeDisk {
-		identifiers = appendIdentifiersIfValid(identifiers, func() ([]string, error) {
-			return linuxDiskSerials(ctx, p.commandExecutor, logger)
-		}, "disk:", diag, ComponentDisk, logger)
+		tasks = append(tasks, componentTask{component: ComponentDisk, prefix: "disk:",
+			multi: func(ctx context.Context) ([]string, error) {
+				return linuxDiskSerials(ctx, executor, logger)
+			}})
 	}
 
-	return identifiers, nil
+	return runComponentTasks(ctx, tasks, diag, logger), nil
 }
 
 // linuxCPUID retrieves CPU information from /proc/cpuinfo.
@@ -82,20 +94,21 @@ func parseCPUInfo(content string) (string, error) {
 
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
-		parts := strings.SplitN(line, ":", 2)
-		if len(parts) != 2 {
+		_, value, found := strings.Cut(line, ":")
+		if !found {
 			continue
 		}
+		value = strings.TrimSpace(value)
 
 		switch {
 		case strings.HasPrefix(line, "processor"):
-			processor = strings.TrimSpace(parts[1])
+			processor = value
 		case strings.HasPrefix(line, "vendor_id"):
-			vendorID = strings.TrimSpace(parts[1])
+			vendorID = value
 		case strings.HasPrefix(line, "model name"):
-			modelName = strings.TrimSpace(parts[1])
+			modelName = value
 		case strings.HasPrefix(line, "flags"):
-			flags = strings.TrimSpace(parts[1])
+			flags = value
 		}
 	}
 
@@ -160,11 +173,6 @@ func readFirstValidFromLocations(locations []string, validator func(string) bool
 	}
 
 	return "", ErrNotFound
-}
-
-// isValidUUID reports whether the UUID is valid (not empty or null).
-func isValidUUID(uuid string) bool {
-	return uuid != "" && uuid != "00000000-0000-0000-0000-000000000000"
 }
 
 // isValidSerial reports whether the serial is valid (not empty or placeholder).

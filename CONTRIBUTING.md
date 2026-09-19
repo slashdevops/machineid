@@ -6,9 +6,11 @@ Thank you for your interest in contributing to machineid! This document provides
 
 ### Prerequisites
 
-- Go 1.26 or higher
+- Go 1.27 or higher
 - Git
 - Make
+
+Runnable examples are listed with `go doc -ex github.com/slashdevops/machineid`.
 
 ### Getting Started
 

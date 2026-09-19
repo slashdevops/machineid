@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os/exec"
 	"testing"
 )
 
@@ -41,8 +42,7 @@ func TestParseWmicValueEmpty(t *testing.T) {
 	if err == nil {
 		t.Error("Expected error for empty value")
 	}
-	var parseErr *ParseError
-	if !errors.As(err, &parseErr) {
+	if _, ok := errors.AsType[*ParseError](err); !ok {
 		t.Errorf("Expected ParseError, got %T", err)
 	}
 }
@@ -130,8 +130,7 @@ func TestParsePowerShellValueEmpty(t *testing.T) {
 	if err == nil {
 		t.Error("Expected error for empty value")
 	}
-	var parseErr *ParseError
-	if !errors.As(err, &parseErr) {
+	if _, ok := errors.AsType[*ParseError](err); !ok {
 		t.Errorf("Expected ParseError, got %T", err)
 	}
 	if !errors.Is(err, ErrEmptyValue) {
@@ -144,8 +143,7 @@ func TestParsePowerShellValueOEMPlaceholder(t *testing.T) {
 	if err == nil {
 		t.Fatal("Expected error for OEM placeholder value")
 	}
-	var parseErr *ParseError
-	if !errors.As(err, &parseErr) {
+	if _, ok := errors.AsType[*ParseError](err); !ok {
 		t.Errorf("Expected ParseError, got %T", err)
 	}
 	if !errors.Is(err, ErrOEMPlaceholder) {
@@ -419,14 +417,14 @@ func TestWindowsSystemUUIDAllFail(t *testing.T) {
 func TestWindowsSystemUUIDWmicParseFailFallback(t *testing.T) {
 	mock := newMockExecutor()
 	mock.setOutput("wmic", "garbage") // parse fails
-	mock.setOutput("powershell", "UUID-FROM-PS")
+	mock.setOutput("powershell", "7D8E4B3A-1C2D-4E5F-8A9B-0C1D2E3F4A5B")
 
 	result, err := windowsSystemUUID(context.Background(), mock, nil)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
-	if result != "UUID-FROM-PS" {
-		t.Errorf("Expected 'UUID-FROM-PS', got %q", result)
+	if result != "7D8E4B3A-1C2D-4E5F-8A9B-0C1D2E3F4A5B" {
+		t.Errorf("Expected '7D8E4B3A-1C2D-4E5F-8A9B-0C1D2E3F4A5B', got %q", result)
 	}
 }
 
@@ -436,7 +434,7 @@ func TestWindowsSystemUUIDWithLogger(t *testing.T) {
 
 	mock := newMockExecutor()
 	mock.setOutput("wmic", "garbage")
-	mock.setOutput("powershell", "UUID-LOGGED")
+	mock.setOutput("powershell", "7D8E4B3A-1C2D-4E5F-8A9B-0C1D2E3F4A5C")
 
 	_, err := windowsSystemUUID(context.Background(), mock, logger)
 	if err != nil {
@@ -454,14 +452,14 @@ func TestWindowsSystemUUIDWithLogger(t *testing.T) {
 
 func TestWindowsSystemUUIDViaPowerShellSuccess(t *testing.T) {
 	mock := newMockExecutor()
-	mock.setOutput("powershell", "UUID-PS-123")
+	mock.setOutput("powershell", "7D8E4B3A-1C2D-4E5F-8A9B-0C1D2E3F4A5D")
 
 	result, err := windowsSystemUUIDViaPowerShell(context.Background(), mock, nil)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
-	if result != "UUID-PS-123" {
-		t.Errorf("Expected 'UUID-PS-123', got %q", result)
+	if result != "7D8E4B3A-1C2D-4E5F-8A9B-0C1D2E3F4A5D" {
+		t.Errorf("Expected '7D8E4B3A-1C2D-4E5F-8A9B-0C1D2E3F4A5D', got %q", result)
 	}
 }
 
@@ -628,6 +626,85 @@ func TestWindowsDiskSerialsWithLogger(t *testing.T) {
 	}
 }
 
+// --- wmic probe tests ---
+
+// init forces the wmic probe to succeed so the wmic code paths are exercised
+// even on hosts (Windows 11 24H2+, Server 2025) where wmic is absent.
+func init() {
+	lookPath = func(file string) (string, error) { return file, nil }
+}
+
+// withLookPath swaps the wmic probe for the duration of a test.
+func withLookPath(t *testing.T, fn func(string) (string, error)) {
+	t.Helper()
+	prev := lookPath
+	lookPath = fn
+	t.Cleanup(func() { lookPath = prev })
+}
+
+func TestWmicAbsentSkipsToPowerShell(t *testing.T) {
+	withLookPath(t, func(string) (string, error) { return "", exec.ErrNotFound })
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	mock := newMockExecutor()
+	mock.setOutput("wmic", "ProcessorId=SHOULD-NOT-BE-USED\r\n")
+	mock.setOutput("powershell", "BFEBFBFF000906EA")
+
+	result, err := windowsCPUID(context.Background(), mock, logger)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if result != "BFEBFBFF000906EA" {
+		t.Errorf("Expected PowerShell value, got %q", result)
+	}
+	if mock.calls("wmic") != 0 {
+		t.Errorf("Expected wmic not to be invoked, got %d calls", mock.calls("wmic"))
+	}
+	if !bytes.Contains(buf.Bytes(), []byte("wmic not found")) {
+		t.Error("Expected 'wmic not found' in log")
+	}
+}
+
+func TestRunPowerShellUsesNonInteractiveFlags(t *testing.T) {
+	mock := newMockExecutor()
+	mock.setOutputForArgs("powershell",
+		[]string{"-NoProfile", "-NonInteractive", "-Command", "Write-Output hi"}, "hi")
+
+	result, err := runPowerShell(context.Background(), mock, nil, "Write-Output hi")
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if result != "hi" {
+		t.Errorf("Expected 'hi', got %q", result)
+	}
+}
+
+func TestWindowsSystemUUIDWmicInvalidUUIDFallsBack(t *testing.T) {
+	mock := newMockExecutor()
+	mock.setOutput("wmic", "UUID=00000000-0000-0000-0000-000000000000\r\n")
+	mock.setOutput("powershell", "7D8E4B3A-1C2D-4E5F-8A9B-0C1D2E3F4A5B")
+
+	result, err := windowsSystemUUID(context.Background(), mock, nil)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if result != "7D8E4B3A-1C2D-4E5F-8A9B-0C1D2E3F4A5B" {
+		t.Errorf("Expected PowerShell UUID, got %q", result)
+	}
+}
+
+func TestWindowsSystemUUIDViaPowerShellInvalid(t *testing.T) {
+	mock := newMockExecutor()
+	mock.setOutput("powershell", "FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF")
+
+	_, err := windowsSystemUUIDViaPowerShell(context.Background(), mock, nil)
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("Expected ErrNotFound for max UUID, got %v", err)
+	}
+}
+
 // --- appendSingleResult tests ---
 
 func TestAppendSingleResultSuccess(t *testing.T) {
@@ -670,8 +747,7 @@ func TestAppendSingleResultEmpty(t *testing.T) {
 	if _, exists := diag.Errors["cpu"]; !exists {
 		t.Error("Expected error recorded for empty cpu")
 	}
-	var compErr *ComponentError
-	if !errors.As(diag.Errors["cpu"], &compErr) {
+	if _, ok := errors.AsType[*ComponentError](diag.Errors["cpu"]); !ok {
 		t.Error("Expected ComponentError")
 	}
 }
@@ -742,8 +818,7 @@ func TestAppendMultiResultEmpty(t *testing.T) {
 	if _, exists := diag.Errors["disk"]; !exists {
 		t.Error("Expected error recorded for empty disk")
 	}
-	var compErr *ComponentError
-	if !errors.As(diag.Errors["disk"], &compErr) {
+	if _, ok := errors.AsType[*ComponentError](diag.Errors["disk"]); !ok {
 		t.Error("Expected ComponentError")
 	}
 	if !errors.Is(diag.Errors["disk"], ErrNoValues) {
@@ -780,7 +855,7 @@ func TestAppendMultiResultNilDiag(t *testing.T) {
 func TestCollectIdentifiersConcurrent(t *testing.T) {
 	mock := newMockExecutor()
 	mock.setOutput("wmic", "ProcessorId=CPUID123\r\n")
-	mock.setOutput("powershell", "UUID-FROM-PS")
+	mock.setOutput("powershell", "7D8E4B3A-1C2D-4E5F-8A9B-0C1D2E3F4A5B")
 
 	p := New().WithExecutor(mock).WithCPU().WithSystemUUID()
 	diag := &DiagnosticInfo{Errors: make(map[string]error)}
@@ -799,7 +874,7 @@ func TestCollectIdentifiersConcurrent(t *testing.T) {
 
 func TestCollectIdentifiersAllComponents(t *testing.T) {
 	mock := newMockExecutor()
-	mock.setOutput("wmic", "ProcessorId=CPUID\r\nSerialNumber=MBSERIAL\r\nUUID=UUID123\r\n")
+	mock.setOutput("wmic", "ProcessorId=CPUID\r\nSerialNumber=MBSERIAL\r\nUUID=7D8E4B3A-1C2D-4E5F-8A9B-0C1D2E3F4A5E\r\n")
 
 	p := New().WithExecutor(mock).
 		WithCPU().

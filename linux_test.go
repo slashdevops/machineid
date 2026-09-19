@@ -43,8 +43,7 @@ func TestParseCPUInfoEmpty(t *testing.T) {
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("Expected ErrNotFound, got %v", err)
 	}
-	var parseErr *ParseError
-	if !errors.As(err, &parseErr) {
+	if _, ok := errors.AsType[*ParseError](err); !ok {
 		t.Errorf("Expected ParseError, got %T", err)
 	}
 }
@@ -107,29 +106,6 @@ flags		: fpu vme avx
 	expected := "1:GenuineIntel:Intel Core i7:fpu vme avx"
 	if result != expected {
 		t.Errorf("Expected %q, got %q", expected, result)
-	}
-}
-
-// --- isValidUUID tests ---
-
-func TestIsValidUUID(t *testing.T) {
-	tests := []struct {
-		name  string
-		uuid  string
-		valid bool
-	}{
-		{"valid UUID", "4C4C4544-0058-5210-8048-B4C04F595031", true},
-		{"empty", "", false},
-		{"null UUID", "00000000-0000-0000-0000-000000000000", false},
-		{"simple string", "abc123", true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := isValidUUID(tt.uuid); got != tt.valid {
-				t.Errorf("isValidUUID(%q) = %v, want %v", tt.uuid, got, tt.valid)
-			}
-		})
 	}
 }
 

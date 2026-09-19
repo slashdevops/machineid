@@ -1,101 +1,123 @@
-# machineid
+# 🆔 machineid
 
-[![main branch](https://github.com/slashdevops/machineid/actions/workflows/main.yml/badge.svg)](https://github.com/slashdevops/machineid/actions/workflows/main.yml)
-![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/slashdevops/machineid?style=plastic)
+**Deterministic, hardware-derived machine identifiers for Go. Zero dependencies. One binary.**
+
+[![Pull Request](https://github.com/slashdevops/machineid/actions/workflows/pr.yml/badge.svg)](https://github.com/slashdevops/machineid/actions/workflows/pr.yml)
+[![Release](https://github.com/slashdevops/machineid/actions/workflows/release.yml/badge.svg)](https://github.com/slashdevops/machineid/actions/workflows/release.yml)
+[![CodeQL](https://github.com/slashdevops/machineid/actions/workflows/codeql.yml/badge.svg)](https://github.com/slashdevops/machineid/actions/workflows/codeql.yml)
+[![Go version](https://img.shields.io/github/go-mod/go-version/slashdevops/machineid)](go.mod)
 [![Go Reference](https://pkg.go.dev/badge/github.com/slashdevops/machineid.svg)](https://pkg.go.dev/github.com/slashdevops/machineid)
 [![Go Report Card](https://goreportcard.com/badge/github.com/slashdevops/machineid)](https://goreportcard.com/report/github.com/slashdevops/machineid)
-[![license](https://img.shields.io/github/license/slashdevops/machineid.svg)](https://github.com/slashdevops/machineid/blob/main/LICENSE)
-[![Release](https://github.com/slashdevops/machineid/actions/workflows/release.yml/badge.svg)](https://github.com/slashdevops/machineid/actions/workflows/release.yml)
+[![Latest release](https://img.shields.io/github/v/release/slashdevops/machineid?sort=semver)](https://github.com/slashdevops/machineid/releases/latest)
+[![License](https://img.shields.io/github/license/slashdevops/machineid.svg)](LICENSE)
 
-A **zero-dependency** Go library that generates unique, deterministic machine identifiers from hardware characteristics. IDs are stable across reboots, sensitive to hardware changes, and ideal for software licensing, device fingerprinting, and telemetry correlation.
+`machineid` turns the hardware a program is running on into a stable, opaque identifier. The same machine always produces the same ID; a different machine never does. IDs survive reboots and OS reinstalls, change when the hardware changes, and reveal nothing about the hardware itself.
 
-## Features
+Use it for **software licensing and activation**, **device fingerprinting**, **per-host telemetry correlation**, **fleet inventory**, or anywhere you need "which machine is this?" answered without a database.
 
-- **Zero Dependencies** — built entirely on the Go standard library
-- **Cross-Platform** — macOS, Linux, and Windows
-- **Configurable** — choose which hardware signals to include (CPU, Motherboard, System UUID, MAC, Disk)
-- **Power-of-2 Output** — 32, 64, 128, or 256 hex characters
-- **SHA-256 Hashing** — cryptographically secure, no collisions in practice
-- **Salt Support** — application-specific IDs on the same machine
-- **VM Friendly** — preset for virtual environments (CPU + UUID)
-- **Thread-Safe** — safe for concurrent use after configuration
-- **Diagnostic API** — inspect which components succeeded or failed
-- **Optional Logging** — `*slog.Logger` support for observability with zero overhead when disabled
-- **Structured Errors** — sentinel errors and typed errors for programmatic handling via `errors.Is` / `errors.As`
-- **Testable** — dependency-injectable command executor
+```bash
+$ machineid
+b5c42832542981af58c9dc3bc241219e780ff7d276cfad05fac222846edb84f7
+```
 
-## Installation
+```go
+id, err := machineid.New().WithCPU().WithSystemUUID().ID(ctx)
+```
+
+---
+
+## 📚 Table of contents
+
+- [✨ Features](#-features)
+- [📦 Installation](#-installation)
+- [🚀 Quick start](#-quick-start)
+- [🖥️ CLI](#️-cli)
+- [📖 Library guide](#-library-guide)
+- [⚙️ How it works](#️-how-it-works)
+- [🧭 Choosing components](#-choosing-components)
+- [🔒 Security](#-security)
+- [🧪 Testing](#-testing)
+- [🛠️ Troubleshooting](#️-troubleshooting)
+- [🤝 Contributing](#-contributing)
+- [📄 License](#-license)
+
+---
+
+## ✨ Features
+
+| | |
+|---|---|
+| 🧩 **Zero dependencies** | Built entirely on the Go standard library. Nothing to audit, nothing to update. |
+| 🌍 **Cross-platform** | macOS, Linux and Windows, each with native primary sources and fallbacks. |
+| 🎛️ **Configurable signals** | Pick any mix of CPU, motherboard serial, system UUID, MAC addresses and disk serials. |
+| 📏 **Power-of-two output** | 32, 64, 128 or 256 hex characters, pure hex, no dashes. |
+| 🔐 **SHA-256 based** | One-way hash. Hardware details cannot be recovered from an ID. |
+| 🧂 **Salt support** | Different IDs for different applications on the same machine. |
+| ☁️ **VM friendly** | A preset that ignores the signals virtual machines and clouds change. |
+| ⚡ **Concurrent collection** | Every hardware query runs in parallel on every platform. Latency is the slowest single query, not the sum. |
+| 🔁 **Deterministic** | Results are folded in a fixed order. Same ID, same diagnostics, every run. |
+| 🩺 **Diagnostics API** | See exactly which components were collected and why the others failed. |
+| 🪵 **Optional `slog` logging** | Structured logs at info, warn and debug. Zero overhead when no logger is set. |
+| 🚨 **Structured errors** | Sentinel errors for `errors.Is`, typed errors for `errors.AsType`, timeouts that match `context.DeadlineExceeded`. |
+| 🧪 **Testable** | Inject a command executor and run the whole library against fixtures. |
+| 🧵 **Thread-safe** | A configured provider can be shared freely across goroutines. |
+
+---
+
+## 📦 Installation
 
 ### Library
-
-Add the module to your Go project:
 
 ```bash
 go get github.com/slashdevops/machineid
 ```
 
-Requires **Go 1.26+**. No external dependencies.
+Requires **Go 1.27 or newer**. No external dependencies.
 
-### CLI Tool
+### CLI
 
-#### Using `go install`
+#### With `go install`
 
 ```bash
 go install github.com/slashdevops/machineid/cmd/machineid@latest
 ```
 
-Make sure `~/go/bin` is in your `PATH`:
+Make sure `$(go env GOPATH)/bin` is on your `PATH`:
 
 ```bash
-mkdir -p ~/go/bin
-
 # bash
-cat >> ~/.bash_profile <<EOL
-export PATH=\$PATH:~/go/bin
-EOL
-
-source ~/.bash_profile
+echo 'export PATH="$PATH:$(go env GOPATH)/bin"' >> ~/.bash_profile && source ~/.bash_profile
 
 # zsh
-cat >> ~/.zshrc <<EOL
-export PATH=\$PATH:~/go/bin
-EOL
-
-source ~/.zshrc
+echo 'export PATH="$PATH:$(go env GOPATH)/bin"' >> ~/.zshrc && source ~/.zshrc
 ```
 
-#### Installing a Precompiled Binary
+#### Pre-built binaries
 
-Signed and notarized binaries for macOS, Linux, and Windows are available on the [releases page](https://github.com/slashdevops/machineid/releases).
+Signed binaries are published on the [releases page](https://github.com/slashdevops/machineid/releases).
 
-**macOS** (signed & notarized universal `.pkg` installer — arm64 + amd64):
+**🍎 macOS** (signed, notarized, universal `.pkg` for Apple Silicon and Intel; requires **macOS 13 Ventura or newer**):
 
 ```bash
 curl -L https://github.com/slashdevops/machineid/releases/latest/download/machineid-darwin-universal.pkg -o machineid.pkg
 sudo installer -pkg machineid.pkg -target /
 ```
 
-Or double-click the `.pkg` file in Finder to use the graphical installer.
+Or double-click the `.pkg` in Finder.
 
-**Linux**:
+**🐧 Linux** (`amd64` and `arm64`, signed with Sigstore):
 
 ```bash
-curl -L https://github.com/slashdevops/machineid/releases/latest/download/machineid-linux-amd64.zip -o machineid.zip
-unzip machineid.zip && sudo mv machineid /usr/local/bin/
+ARCH=amd64   # or arm64
+curl -L "https://github.com/slashdevops/machineid/releases/latest/download/machineid-linux-${ARCH}.zip" -o machineid.zip
+unzip machineid.zip && sudo install -m 0755 machineid /usr/local/bin/machineid
 ```
 
-**Windows** (via PowerShell):
+**🪟 Windows**: use `go install` above or build from source. Pre-built Windows binaries are not published yet.
 
-```powershell
-Invoke-WebRequest -Uri https://github.com/slashdevops/machineid/releases/latest/download/machineid-windows-amd64.zip -OutFile machineid.zip
-Expand-Archive machineid.zip -DestinationPath $env:USERPROFILE\bin
-```
+How to verify a download: [macOS signing and notarization](docs/macos-signing.md) and [Linux Sigstore verification](docs/linux-signing.md).
 
-See [docs/macos-signing.md](docs/macos-signing.md) and [docs/linux-signing.md](docs/linux-signing.md) for details on binary verification.
-
-#### Building from Source
-
-Clone the repository and build with version metadata via the provided Makefile:
+#### From source
 
 ```bash
 git clone https://github.com/slashdevops/machineid.git
@@ -104,7 +126,9 @@ make build
 ./build/machineid -version
 ```
 
-## Quick Start
+---
+
+## 🚀 Quick start
 
 ```go
 package main
@@ -119,6 +143,7 @@ import (
 
 func main() {
     ctx := context.Background()
+
     id, err := machineid.New().
         WithCPU().
         WithSystemUUID().
@@ -126,147 +151,180 @@ func main() {
     if err != nil {
         log.Fatal(err)
     }
-    fmt.Println(id)
-    // Output: 64-character hex string (e.g. b5c42832542981af…)
+
+    fmt.Println(id) // 64 hex characters, e.g. b5c42832542981af…
 }
 ```
 
-## Usage
+The context bounds every system command the library runs. Pass one with a deadline if you need a hard upper limit.
 
-### Selecting Hardware Components
+---
 
-Enable one or more hardware sources via the `With*` methods:
+## 🖥️ CLI
+
+```bash
+# Default: CPU + motherboard + UUID, 64 hex characters
+machineid
+
+# Pick components
+machineid -cpu -uuid
+
+# Everything, compact 32-character output
+machineid -all -format 32
+
+# VM-friendly preset with an application salt
+machineid -vm -salt "my-app"
+
+# JSON with per-component diagnostics
+machineid -all -json -diagnostics
+
+# Validate an ID you stored earlier (exit code 0 = match, 1 = mismatch)
+machineid -cpu -uuid -validate "b5c42832542981af58c9dc3bc241219e780ff7d276cfad05fac222846edb84f7"
+
+# Include virtual interfaces too
+machineid -mac -mac-filter all
+
+# Logs to stderr: info level, or debug level with commands, raw values and timing
+machineid -all -verbose
+machineid -all -debug
+
+# Build information
+machineid -version
+machineid -version-long
+```
+
+Ctrl-C or `SIGTERM` cancels any hardware query that is still running.
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `-cpu` | Include the CPU identifier |
+| `-motherboard` | Include the motherboard serial number |
+| `-uuid` | Include the system UUID (BIOS/UEFI) |
+| `-mac` | Include network interface MAC addresses |
+| `-mac-filter F` | MAC filter: `physical` (default), `all` or `virtual` |
+| `-disk` | Include disk serial numbers |
+| `-all` | Include every component |
+| `-vm` | VM-friendly preset: CPU + UUID only |
+| `-format N` | Output length: `32`, `64` (default), `128` or `256` hex characters |
+| `-salt STRING` | Application-specific salt |
+| `-validate ID` | Compare a stored ID against this machine |
+| `-diagnostics` | Show which components were collected or failed |
+| `-json` | JSON output |
+| `-verbose` | Info-level logs on stderr |
+| `-debug` | Debug-level logs on stderr |
+| `-version` | Print the version |
+| `-version-long` | Print detailed build information |
+
+With no component flags the default is `-cpu -motherboard -uuid`.
+
+| Exit code | Meaning |
+|-----------|---------|
+| `0` | Success, or `-validate` matched |
+| `1` | ID generation failed, or `-validate` did not match |
+| `2` | Invalid arguments |
+
+---
+
+## 📖 Library guide
+
+### Selecting hardware components
 
 ```go
-ctx := context.Background()
 provider := machineid.New().
-    WithCPU().            // processor ID and feature flags
-    WithMotherboard().    // motherboard serial number
-    WithSystemUUID().     // BIOS/UEFI system UUID
-    WithMAC().            // physical network interface MAC addresses (default filter)
-
-    WithDisk()            // internal disk serial numbers
+    WithCPU().          // processor identifier and feature flags
+    WithMotherboard().  // motherboard / baseboard serial number
+    WithSystemUUID().   // BIOS / UEFI system UUID
+    WithMAC().          // physical network interface MAC addresses
+    WithDisk()          // internal disk serial numbers
 
 id, err := provider.ID(ctx)
 ```
 
-### MAC Address Filtering
-
-Control which network interfaces are included in the machine ID using `MACFilter`:
+### MAC address filtering
 
 ```go
-ctx := context.Background()
+// Physical interfaces only (default, most stable on bare metal)
+machineid.New().WithCPU().WithMAC()
 
-// Physical interfaces only (default, most stable for bare-metal)
-id, _ := machineid.New().WithCPU().WithMAC().ID(ctx)
+// Physical and virtual (VPN, Docker, bridges)
+machineid.New().WithCPU().WithMAC(machineid.MACFilterAll)
 
-// All interfaces including virtual (VPN, Docker, bridges)
-id, _ = machineid.New().WithCPU().WithMAC(machineid.MACFilterAll).ID(ctx)
-
-// Only virtual interfaces (useful for container-specific fingerprinting)
-id, _ = machineid.New().WithCPU().WithMAC(machineid.MACFilterVirtual).ID(ctx)
+// Virtual interfaces only (container-specific fingerprinting)
+machineid.New().WithCPU().WithMAC(machineid.MACFilterVirtual)
 ```
 
-| Filter              | Interfaces Included                                    | Best For                 |
-|---------------------|--------------------------------------------------------|--------------------------|
-| `MACFilterPhysical` | `en0`, `eth0`, `wlan0` (default)                       | Bare-metal stability     |
-| `MACFilterAll`      | Physical + virtual (`docker0`, `utun`, `bridge`, etc.) | Maximum uniqueness       |
-| `MACFilterVirtual`  | `docker0`, `utun`, `bridge0`, `veth`, `vmnet`, etc.    | Container fingerprinting |
+| Filter | Interfaces included | Best for |
+|--------|---------------------|----------|
+| `MACFilterPhysical` | `en0`, `eth0`, `wlan0`, … (default) | Bare-metal stability |
+| `MACFilterAll` | Physical + virtual (`docker0`, `utun`, `bridge`, …) | Maximum uniqueness |
+| `MACFilterVirtual` | `docker0`, `utun`, `bridge0`, `veth`, `vmnet`, … | Container fingerprinting |
 
-### Output Formats
+Loopback interfaces and interfaces that are down are always excluded.
 
-All formats produce pure hexadecimal strings without dashes:
+### Output formats
 
 ```go
-ctx := context.Background()
-
-// 32 characters (2^5) — compact
-id, _ := machineid.New().WithCPU().WithSystemUUID().WithFormat(machineid.Format32).ID(ctx)
-
-// 64 characters (2^6) — default, full SHA-256
-id, _ = machineid.New().WithCPU().WithSystemUUID().WithFormat(machineid.Format64).ID(ctx)
-
-// 128 characters (2^7) — extended
-id, _ = machineid.New().WithCPU().WithSystemUUID().WithFormat(machineid.Format128).ID(ctx)
-
-// 256 characters (2^8) — maximum
-id, _ = machineid.New().WithCPU().WithSystemUUID().WithFormat(machineid.Format256).ID(ctx)
+machineid.New().WithCPU().WithSystemUUID().WithFormat(machineid.Format32)   // 32 hex chars
+machineid.New().WithCPU().WithSystemUUID().WithFormat(machineid.Format64)   // 64, default
+machineid.New().WithCPU().WithSystemUUID().WithFormat(machineid.Format128)  // 128
+machineid.New().WithCPU().WithSystemUUID().WithFormat(machineid.Format256)  // 256
 ```
 
-| Format | Length | Bits | Collision Probability (1 B IDs) | Use Case |
-|-----------|--------|------|--------------------------------|----------------------|
-| `Format32`  | 32     | 128  | ~1.47 × 10⁻²¹                 | Compact identifiers  |
-| `Format64`  | 64     | 256  | ~4.32 × 10⁻⁶⁰                 | Default, recommended |
-| `Format128` | 128    | 512  | Virtually zero                 | Extended security    |
-| `Format256` | 256    | 1024 | Astronomically low             | Maximum security     |
+| Format | Length | Bits | Collision probability at 10⁹ IDs | Use case |
+|--------|--------|------|----------------------------------|----------|
+| `Format32` | 32 | 128 | ~1.5 × 10⁻²¹ | Compact identifiers |
+| `Format64` | 64 | 256 | ~4.3 × 10⁻⁶⁰ | **Default, recommended** |
+| `Format128` | 128 | 512 | Effectively zero | Extended margin |
+| `Format256` | 256 | 1024 | Effectively zero | Maximum margin |
 
-### Custom Salt
+### Salt
 
-A salt ensures the same machine produces different IDs for different applications:
+A salt makes the same machine produce a different ID for each application:
 
 ```go
-ctx := context.Background()
-id, _ := machineid.New().
+id, err := machineid.New().
     WithCPU().
     WithSystemUUID().
     WithSalt("my-app-v1").
     ID(ctx)
 ```
 
-### VM-Friendly Mode
+### VM-friendly preset
 
-For virtual machines where disk serials and MACs may be unstable:
+Virtual machines and cloud instances change disks, MACs and sometimes motherboards under you. The preset keeps only the CPU and the system UUID:
 
 ```go
-ctx := context.Background()
-id, _ := machineid.New().
-    VMFriendly().  // CPU + System UUID only
-    WithSalt("my-app").
-    ID(ctx)
+id, err := machineid.New().VMFriendly().WithSalt("my-app").ID(ctx)
 ```
 
 ### Validation
 
-Check whether a stored ID still matches the current hardware:
-
 ```go
-ctx := context.Background()
 provider := machineid.New().WithCPU().WithSystemUUID()
 valid, err := provider.Validate(ctx, storedID)
 ```
 
 ### Diagnostics
 
-Inspect which hardware components were successfully collected:
-
 ```go
-ctx := context.Background()
-provider := machineid.New().
-    WithCPU().
-    WithSystemUUID().
-    WithDisk()
-
+provider := machineid.New().WithCPU().WithSystemUUID().WithDisk()
 id, _ := provider.ID(ctx)
 
-diag := provider.Diagnostics()
-fmt.Println("Collected:", diag.Collected)  // e.g. [cpu uuid]
-fmt.Println("Errors:", diag.Errors)        // e.g. map[disk: no internal disk identifiers found]
+diag := provider.Diagnostics() // a copy; modify freely
+fmt.Println("Collected:", diag.Collected) // [cpu uuid]
+fmt.Println("Errors:", diag.Errors)       // map[disk:component "disk": no values found]
 ```
+
+`Collected` is always in the same order for the same configuration, regardless of which query finished first.
 
 ### Logging
 
-Enable optional logging with any `*slog.Logger` for observability. When no logger is set (the default), there is zero overhead:
+Any `*slog.Logger` works, including `slog.Default()`. Without a logger there is no overhead at all.
 
 ```go
-import (
-    "log/slog"
-    "os"
-)
-
-ctx := context.Background()
-logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-    Level: slog.LevelDebug,
-}))
+logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
 id, err := machineid.New().
     WithCPU().
@@ -275,268 +333,184 @@ id, err := machineid.New().
     ID(ctx)
 ```
 
-| Log Level | What's Logged                                                         |
-|-----------|-----------------------------------------------------------------------|
-| **Info**  | Component collected, fallback triggered, ID generation lifecycle      |
-| **Warn**  | Component failed or returned empty value                              |
-| **Debug** | Command execution details (name, args, duration), raw hardware values |
+| Level | What is logged |
+|-------|----------------|
+| **Info** | Component collected, fallback taken, ID generation lifecycle |
+| **Warn** | Component failed or returned an empty value |
+| **Debug** | Every command with arguments and duration, raw hardware values, reuse of cached command output |
 
-The logger is compatible with `slog.Default()` which bridges to the standard `log` package:
+### Timeouts and cancellation
 
-```go
-// Use the standard library default logger
-provider.WithLogger(slog.Default())
-```
-
-### Error Handling
-
-The package provides sentinel errors for `errors.Is` and typed errors for `errors.As`:
+Every system command runs under the context you pass to `ID` plus its own five second timeout. A context that is already done is rejected before anything runs. When a command is killed by the deadline or by cancellation, the recorded error wraps the context error:
 
 ```go
-id, err := provider.ID(ctx)
-if errors.Is(err, machineid.ErrNoIdentifiers) {
-    // No hardware identifiers were collected
+ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+defer cancel()
+
+_, err := provider.ID(ctx)
+if errors.Is(err, context.DeadlineExceeded) {
+    // a hardware query took too long
 }
 ```
 
-#### Sentinel Errors
+### Error handling
 
-| Error                 | Meaning                                                          |
-|-----------------------|------------------------------------------------------------------|
-| `ErrNoIdentifiers`    | No hardware identifiers collected with current config            |
-| `ErrEmptyValue`       | A component returned an empty value                              |
-| `ErrNoValues`         | A multi-value component (MAC, disk) returned no values           |
-| `ErrNotFound`         | A value was not found in command output or system files          |
-| `ErrOEMPlaceholder`   | A value matches a BIOS/UEFI placeholder ("To be filled...")      |
-| `ErrAllMethodsFailed` | All collection methods for a component were exhausted            |
+Sentinel errors for `errors.Is`:
 
-#### Typed Errors
+| Error | Meaning |
+|-------|---------|
+| `ErrNoIdentifiers` | No component produced a value with the current configuration |
+| `ErrEmptyValue` | A component returned an empty value |
+| `ErrNoValues` | A multi-value component (MAC, disk) returned nothing |
+| `ErrNotFound` | The value was missing from command output or system files |
+| `ErrOEMPlaceholder` | The value is a BIOS placeholder such as "To be filled by O.E.M." |
+| `ErrAllMethodsFailed` | Every source for a component failed |
 
-Use `errors.As` to extract structured context from errors:
+Typed errors for `errors.AsType`:
 
 ```go
-// Check if a system command failed
-var cmdErr *machineid.CommandError
-if errors.As(err, &cmdErr) {
-    fmt.Println("command:", cmdErr.Command) // e.g. "sysctl", "ioreg", "wmic"
+// A system command failed
+if cmdErr, ok := errors.AsType[*machineid.CommandError](err); ok {
+    fmt.Println("command:", cmdErr.Command) // "sysctl", "ioreg", "wmic", "powershell", …
+    fmt.Println("stderr:", cmdErr.Stderr)   // first line of stderr, if any
 }
 
-// Check if output parsing failed
-var parseErr *machineid.ParseError
-if errors.As(err, &parseErr) {
-    fmt.Println("source:", parseErr.Source) // e.g. "system_profiler JSON"
+// Output could not be parsed
+if parseErr, ok := errors.AsType[*machineid.ParseError](err); ok {
+    fmt.Println("source:", parseErr.Source) // "system_profiler hardware JSON", …
 }
 
-// Inspect diagnostic errors per component
-diag := provider.Diagnostics()
-var compErr *machineid.ComponentError
-if errors.As(diag.Errors["cpu"], &compErr) {
+// Per-component cause from the diagnostics
+if compErr, ok := errors.AsType[*machineid.ComponentError](diag.Errors["cpu"]); ok {
     fmt.Println("component:", compErr.Component)
     fmt.Println("cause:", compErr.Err)
 }
 ```
 
-## CLI Tool
+---
 
-A ready-to-use command-line tool is included.
+## ⚙️ How it works
 
-See the [Installation](#installation) section above for all ways to install the CLI.
+1. **Collect** every enabled component, concurrently, one goroutine per component.
+2. **Validate** each value. Malformed, nil and max UUIDs and OEM placeholder serials are discarded and the next source is tried.
+3. **Sort** the collected `prefix:value` strings so the order of collection never matters.
+4. **Hash** the joined string (with the salt, if any) with SHA-256.
+5. **Format** to the requested power-of-two length.
 
-### Examples
+### Platform sources
 
-```bash
-# Default: CPU + motherboard + UUID (64 hex chars)
-machineid
+| Platform | CPU | System UUID | Motherboard | Disk | MAC |
+|----------|-----|-------------|-------------|------|-----|
+| 🍎 **macOS** | `sysctl`, `system_profiler` | `system_profiler`, `ioreg` | `system_profiler`, `ioreg` | `system_profiler` | `net.Interfaces` |
+| 🐧 **Linux** | `/proc/cpuinfo` | `/sys/class/dmi/id`, `/etc/machine-id` | `/sys/class/dmi/id` | `lsblk`, `/sys/block` | `net.Interfaces` |
+| 🪟 **Windows** | `wmic`, PowerShell | `wmic`, PowerShell | `wmic`, PowerShell | `wmic`, PowerShell | `net.Interfaces` |
 
-# Specific components
-machineid -cpu -uuid
+Every source has a fallback. Some platform specifics worth knowing:
 
-# All hardware sources, compact 32-char format
-machineid -all -format 32
+- **macOS**: `system_profiler SPHardwareDataType` is the slowest query and is shared by the UUID, serial and CPU collectors, so it runs once per ID.
+- **Windows**: `wmic` was removed from Windows 11 24H2 and Windows Server 2025. The library checks for it once and goes straight to `Get-CimInstance` when it is absent. PowerShell always runs with `-NoProfile -NonInteractive`, so user profiles cannot alter the output.
+- **Linux**: no processes are spawned except `lsblk` for disk serials; everything else is read from `/proc` and `/sys`.
 
-# VM-friendly with custom salt
-machineid -vm -salt "my-app"
+### Performance
 
-# JSON output with diagnostics
-machineid -all -json -diagnostics
+All queries overlap, so an ID costs roughly the slowest single query. On a MacBook Pro the CLI with `-all` completes in about 0.2 seconds. Windows is dominated by PowerShell start-up and typically finishes in one to three seconds.
 
-# Validate a previously stored ID
-machineid -cpu -uuid -validate "b5c42832542981af58c9dc3bc241219e780ff7d276cfad05fac222846edb84f7"
+---
 
-# Include all MACs (physical + virtual)
-machineid -mac -mac-filter all
+## 🧭 Choosing components
 
-# Info-level logging (fallbacks, lifecycle events)
-machineid -all -verbose
+The right mix depends on how stable you need the ID to be versus how unique.
 
-# Debug-level logging (command details, raw values, timing)
-machineid -all -debug
+| Profile | Configuration | Notes |
+|---------|---------------|-------|
+| **VMs and containers** | `VMFriendly()` | CPU + UUID. Survives disk and NIC changes. |
+| **Balanced (recommended)** | `WithCPU().WithSystemUUID().WithMotherboard()` | The CLI default. Stable across reboots and OS reinstalls. |
+| **Maximum uniqueness** | `WithCPU().WithSystemUUID().WithMotherboard().WithMAC().WithDisk()` | Changes when a NIC or disk is swapped. |
 
-# Version information
-machineid -version
-machineid -version-long
-```
+### What changes an ID
 
-### All Flags
+Be deliberate about which of these your users are likely to do.
 
-| Flag             | Description                                                         |
-|------------------|---------------------------------------------------------------------|
-| `-cpu`           | Include CPU identifier                                              |
-| `-motherboard`   | Include motherboard serial number                                   |
-| `-uuid`          | Include system UUID (BIOS/UEFI)                                     |
-| `-mac`           | Include network interface MAC addresses                             |
-| `-mac-filter F`  | MAC filter: `physical` (default), `all`, or `virtual`               |
-| `-disk`          | Include disk serial numbers                                         |
-| `-all`           | Include all hardware identifiers (CPU, motherboard, UUID, MAC, disk)|
-| `-vm`            | VM-friendly mode: CPU + UUID only                                   |
-| `-format N`      | Output length: `32`, `64` (default), `128`, or `256` hex chars      |
-| `-salt STRING`   | Application-specific salt for unique IDs per app                    |
-| `-validate ID`   | Check a stored ID against the current machine                       |
-| `-diagnostics`   | Show which hardware components were collected or failed             |
-| `-json`          | Format output as JSON                                               |
-| `-verbose`       | Info-level logs to stderr (fallbacks, lifecycle)                    |
-| `-debug`         | Debug-level logs to stderr (commands, values, timing)               |
-| `-version`       | Print version and exit                                              |
-| `-version-long`  | Print detailed build information and exit                           |
+| Event | `cpu` | `uuid` | `motherboard` | `mac` | `disk` |
+|-------|:-----:|:------:|:-------------:|:-----:|:------:|
+| Reboot, OS reinstall | – | – | – | – | – |
+| Replace the motherboard | ✅ | ✅ | ✅ | – | – |
+| Replace or add a NIC | – | – | – | ✅ | – |
+| Replace, add or remove a disk | – | – | – | – | ✅ |
+| Kernel or microcode update (Linux) | ⚠️ | – | – | – | – |
+| VM migration or resize | ⚠️ | ⚠️ | ⚠️ | ✅ | ✅ |
 
-When no component flags are specified, the default is `-cpu -motherboard -uuid`.
+⚠️ On Linux the CPU identifier includes the kernel's CPU `flags` line, which can gain entries after a kernel or microcode update. On virtual machines the hypervisor decides how stable the UUID and motherboard serial are. If either matters to you, prefer `VMFriendly()` plus a salt, or drop `WithCPU()` on Linux.
 
-## How It Works
+---
 
-1. **Collect** — gather hardware identifiers based on the provider configuration
-2. **Sort** — sort identifiers alphabetically for deterministic ordering
-3. **Hash** — apply SHA-256 to the concatenated identifiers (with optional salt)
-4. **Format** — truncate or extend the hash to the selected power-of-2 length
+## 🔒 Security
 
-### Platform Details
+- 🔐 SHA-256 is a one-way hash. An ID cannot be reversed into serial numbers, MAC addresses or any other hardware detail.
+- 🧂 Salting prevents one application's IDs from being reused by another.
+- 🪪 The output contains no personally identifiable information.
+- ⏱️ Every system command has a timeout and is killed, together with its output pipes, when the context ends.
+- 🛡️ Firmware sentinels (nil and max UUIDs, "To be filled by O.E.M.") are rejected so they can never make two different machines share an ID.
+- 🔏 Release binaries are signed: Apple Developer ID plus notarization on macOS, Sigstore keyless signatures on Linux.
 
-| Platform | CPU | UUID | Motherboard | Disk | MAC |
-|----------|-----|------|-------------|------|-----|
-| **macOS** | `sysctl`, `system_profiler` | `system_profiler`, `ioreg` | `system_profiler`, `ioreg` | `system_profiler` | `net.Interfaces` |
-| **Linux** | `/proc/cpuinfo` | `/sys/class/dmi/id`, `/etc/machine-id` | `/sys/class/dmi/id` | `lsblk`, `/sys/block` | `net.Interfaces` |
-| **Windows** | `wmic`, `PowerShell` | `wmic`, `PowerShell` | `wmic`, `PowerShell` | `wmic`, `PowerShell` | `net.Interfaces` |
+Please report vulnerabilities as described in [SECURITY.md](SECURITY.md).
 
-Each source has fallback methods for resilience across OS versions and configurations.
+---
 
-> **Performance note**: On Windows, all hardware queries run **concurrently** using goroutines. This reduces total latency from the sum of all `wmic`/PowerShell calls (which are slow due to process startup overhead) to the maximum of any single call — typically cutting ID generation time from ~8-12s to ~2-3s.
+## 🧪 Testing
 
-## Testing
-
-The library supports dependency injection for deterministic testing without real system commands:
+Inject a `CommandExecutor` to run the library against fixtures instead of real commands. Executors must be safe for concurrent use, because components are collected in parallel.
 
 ```go
-type mockExecutor struct {
+type fakeExecutor struct {
     mu      sync.RWMutex
     outputs map[string]string
 }
 
-func (m *mockExecutor) Execute(ctx context.Context, name string, args ...string) (string, error) {
-    m.mu.RLock()
-    defer m.mu.RUnlock()
-    if output, ok := m.outputs[name]; ok {
-        return output, nil
+func (f *fakeExecutor) Execute(ctx context.Context, name string, args ...string) (string, error) {
+    f.mu.RLock()
+    defer f.mu.RUnlock()
+    if out, ok := f.outputs[name]; ok {
+        return out, nil
     }
-    return "", fmt.Errorf("command not found: %s", name)
+    return "", fmt.Errorf("command not configured: %s", name)
 }
 
-ctx := context.Background()
 provider := machineid.New().
-    WithExecutor(&mockExecutor{
-        outputs: map[string]string{
-            "sysctl": "Intel Core i9",
-        },
-    }).
+    WithExecutor(&fakeExecutor{outputs: map[string]string{"sysctl": "Intel Core i9"}}).
     WithCPU()
 
 id, err := provider.ID(ctx)
 ```
 
-> **Note**: Custom executors must be safe for concurrent use since Windows collects hardware identifiers in parallel goroutines.
-
-Run the test suite:
+Run the suite:
 
 ```bash
-go test -v -race ./...
+go test -race ./...
 ```
 
-## Security Considerations
+Runnable examples are listed with `go doc -ex github.com/slashdevops/machineid`.
 
-- SHA-256 is a cryptographically secure one-way hash — hardware details cannot be recovered from an ID
-- Sorting ensures consistent output regardless of collection order
-- Salt support prevents cross-application ID reuse
-- No personally identifiable information (PII) is exposed in the output
+---
 
-## Best Practices
+## 🛠️ Troubleshooting
 
-### Choosing a Format
+**`ErrNoIdentifiers` on a VM or in a container.** The hypervisor or runtime is hiding the hardware. Run `machineid -all -diagnostics -debug` to see which sources fail, then use `VMFriendly()` or a subset that works in that environment.
 
-| Format | Recommendation |
-|--------|----------------|
-| `Format32` | Embedded systems or storage-constrained environments |
-| `Format64` | **Recommended for most use cases** (default) |
-| `Format128` | Extra security margin or regulatory requirements |
-| `Format256` | Maximum security for critical applications |
+**The ID changed after a Linux kernel update.** See [What changes an ID](#what-changes-an-id). The CPU flags line moved. Drop `WithCPU()` on Linux or switch to `VMFriendly()`.
 
-### Hardware Identifier Selection
+**Windows is slow.** PowerShell start-up dominates. Make sure you are on a build where `wmic` is either present or cleanly absent; the library handles both. Use `-debug` to see per-command timing.
 
-```go
-ctx := context.Background()
+**Git tag rejected: "push declined due to repository rule violations".** The repository enforces ascending semantic versions. Check `git tag -l` and tag a version higher than every existing one.
 
-// Minimal (VMs, containers)
-id, _ := machineid.New().VMFriendly().ID(ctx)
+---
 
-// Balanced (recommended)
-id, _ = machineid.New().
-    WithCPU().
-    WithSystemUUID().
-    WithMotherboard().
-    ID(ctx)
+## 🤝 Contributing
 
-// Maximum (most unique, but sensitive to hardware changes)
-id, _ = machineid.New().
-    WithCPU().
-    WithSystemUUID().
-    WithMotherboard().
-    WithMAC().
-    WithDisk().
-    ID(ctx)
-```
+Contributions are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers the toolchain, code style, testing and the release process. Please open an issue before large changes so we can agree on the approach.
 
-## Troubleshooting
+---
 
-### Git Tag Push Error: "push declined due to repository rule violations"
-
-If you encounter this error when trying to push a tag:
-
-```
-! [remote rejected] v0.0.1 -> v0.0.1 (push declined due to repository rule violations)
-error: failed to push some refs to 'github.com:slashdevops/machineid.git'
-```
-
-**Cause**: This happens when you try to create a tag with a version number that is older than existing tags. GitHub repository rules enforce semantic versioning order to prevent version rollback.
-
-**Solution**: Create a tag with a version number higher than all existing tags.
-
-1. Check existing tags:
-
-   ```bash
-   git tag -l
-   ```
-
-2. Create the next appropriate version:
-
-   ```bash
-   # If the latest tag is v0.0.2, use v0.0.3 or higher
-   git tag -a "v0.0.3" -m "Release v0.0.3"
-   git push origin v0.0.3
-   ```
-
-For more information about versioning and releases, see [CONTRIBUTING.md](CONTRIBUTING.md).
-
-## Contributing
-
-Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on how to contribute, including information about versioning, testing, and code style.
-
-## License
+## 📄 License
 
 [Apache License 2.0](LICENSE)

@@ -84,10 +84,20 @@
 //
 //	valid, err := provider.Validate(ctx, storedID)
 //
+// # Context, Timeouts and Cancellation
+//
+// [Provider.ID] takes a [context.Context] that bounds every system command it
+// runs. Each command additionally has its own five second timeout. A context
+// that is already done is rejected before any collection starts. When a
+// command is ended by the deadline or by cancellation, the [CommandError]
+// recorded for that component wraps [context.DeadlineExceeded] or
+// [context.Canceled], so callers can match it with [errors.Is].
+//
 // # Diagnostics
 //
 // After calling [Provider.ID], call [Provider.Diagnostics] to inspect which
-// components were collected and which encountered errors:
+// components were collected and which encountered errors. The returned value
+// is a copy and can be modified freely:
 //
 //	diag := provider.Diagnostics()
 //	fmt.Println("Collected:", diag.Collected)
@@ -110,7 +120,8 @@
 // Log levels:
 //   - Info: component collected, fallback triggered, ID generation lifecycle
 //   - Warn: component failed or returned empty value
-//   - Debug: command execution details, raw hardware values, timing
+//   - Debug: command execution details, raw hardware values, timing, reuse of
+//     cached command output
 //
 // # Errors
 //
@@ -123,20 +134,34 @@
 //   - [ErrOEMPlaceholder] — a value matches a BIOS/UEFI OEM placeholder
 //   - [ErrAllMethodsFailed] — all collection methods for a component were exhausted
 //
-// Typed errors provide structured context for [errors.As]:
+// Typed errors provide structured context for [errors.AsType]:
 //
-//   - [CommandError] — a system command execution failed (includes the command name)
+//   - [CommandError] — a system command execution failed (includes the command
+//     name and the first line of its stderr)
 //   - [ParseError] — output parsing failed (includes the data source)
 //   - [ComponentError] — a hardware component failed (includes the component name)
 //
 // Errors in [DiagnosticInfo.Errors] are wrapped in [ComponentError], so callers
 // can inspect both the component name and the underlying cause:
 //
-//	var compErr *machineid.ComponentError
-//	if errors.As(diag.Errors["cpu"], &compErr) {
+//	if compErr, ok := errors.AsType[*machineid.ComponentError](diag.Errors["cpu"]); ok {
 //		fmt.Println("component:", compErr.Component)
 //		fmt.Println("cause:", compErr.Err)
 //	}
+//
+// # Input Validation
+//
+// Values that cannot identify a machine are rejected before hashing:
+//
+//   - System UUIDs must parse as a UUID and must not be the nil UUID
+//     (all zeros) or the max UUID (all ones), which firmware reports when no
+//     UUID is programmed. The raw string is hashed exactly as the platform
+//     reported it, so a well-formed UUID always produces the same ID.
+//   - Serial numbers equal to the BIOS placeholder "To be filled by O.E.M."
+//     are discarded.
+//
+// A rejected value falls through to the next source for that component, and
+// the reason is recorded in [DiagnosticInfo.Errors] if every source fails.
 //
 // # Thread Safety
 //
@@ -144,12 +169,25 @@
 // The first successful call to [Provider.ID] freezes the configuration and
 // caches the result; subsequent calls return the cached value.
 //
+// # Concurrency and Performance
+//
+// On every platform, the enabled components are collected concurrently, one
+// goroutine per component, so the total latency is that of the slowest
+// single query rather than the sum. Results are folded in a fixed order, so
+// the ID and [DiagnosticInfo.Collected] are deterministic no matter which
+// query finishes first. Each collector goroutine carries a runtime/pprof
+// label (machineid.component=<name>) that appears in tracebacks.
+//
+// On macOS, the UUID, serial and CPU collectors share one execution of
+// `system_profiler SPHardwareDataType -json` per [Provider.ID] call instead
+// of spawning it once each.
+//
 // # Testing
 //
 // Inject a custom [CommandExecutor] via [Provider.WithExecutor] to replace
 // real system commands with deterministic test doubles. Custom executors
-// must be safe for concurrent use, since Windows collects hardware
-// identifiers in parallel goroutines.
+// must be safe for concurrent use, since components are collected in
+// parallel goroutines. Passing nil keeps the current executor.
 //
 //	provider := machineid.New().
 //		WithExecutor(myMock).
@@ -158,19 +196,20 @@
 // # Platform Support
 //
 // Supported operating systems: macOS (darwin), Linux, and Windows. Each
-// platform uses native tools to collect hardware data:
+// platform uses native tools to collect hardware data, with fallbacks:
 //
-//   - macOS: system_profiler, ioreg, sysctl
+//   - macOS: system_profiler (primary), ioreg and sysctl (fallbacks)
 //   - Linux: /proc/cpuinfo, /sys/class/dmi/id, /etc/machine-id, lsblk, /sys/block
-//   - Windows: wmic, PowerShell (Get-CimInstance) — collected concurrently
+//   - Windows: wmic when present, PowerShell Get-CimInstance otherwise
 //
-// On Windows, all hardware queries run in parallel using goroutines to
-// minimize latency from slow process startup (wmic and PowerShell). Each
-// command uses wmic as the primary method with PowerShell as fallback.
+// On Windows 11 24H2 and Windows Server 2025, where wmic has been removed,
+// the library detects its absence and uses PowerShell directly. PowerShell
+// is always started with -NoProfile -NonInteractive so user profiles cannot
+// alter the output.
 //
 // # Installation
 //
-// To use machineid as a library in your Go project:
+// To use machineid as a library in your Go project (Go 1.27 or newer):
 //
 //	go get github.com/slashdevops/machineid
 //
@@ -178,8 +217,8 @@
 //
 //	go install github.com/slashdevops/machineid/cmd/machineid@latest
 //
-// Precompiled binaries for macOS, Linux, and Windows are available on the
-// [releases page]: https://github.com/slashdevops/machineid/releases
+// Signed binaries for macOS (13 Ventura or newer) and Linux are available on
+// the [releases page]: https://github.com/slashdevops/machineid/releases
 //
 // # CLI Tool
 //
@@ -191,8 +230,12 @@
 //	machineid -all -format 32 -json         # all hardware, compact JSON
 //	machineid -vm -salt "my-app"            # VM-friendly with salt
 //	machineid -mac -mac-filter all          # include all MAC addresses
+//	machineid -all -json -diagnostics       # JSON with per-component diagnostics
+//	machineid -cpu -uuid -validate <id>     # validate a stored ID
 //	machineid -all -verbose                 # info-level logs
 //	machineid -all -debug                   # debug-level logs
 //	machineid -version                      # version info
 //	machineid -version-long                 # detailed build info
+//
+// Ctrl-C or SIGTERM cancels any in-flight hardware query.
 package machineid

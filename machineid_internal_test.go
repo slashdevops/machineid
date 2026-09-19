@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"testing"
 )
 
@@ -492,4 +493,60 @@ func TestExecuteCommandWithLogger(t *testing.T) {
 			t.Error("Expected 'command failed' in log output")
 		}
 	})
+}
+
+// --- Provider hygiene tests ---
+
+func TestDiagnosticsReturnsCopy(t *testing.T) {
+	p := New()
+	p.diagnostics = &DiagnosticInfo{
+		Errors:    map[string]error{"cpu": ErrEmptyValue},
+		Collected: []string{"uuid"},
+	}
+
+	got := p.Diagnostics()
+	got.Errors["disk"] = ErrNoValues
+	got.Collected[0] = "mutated"
+
+	if _, leaked := p.diagnostics.Errors["disk"]; leaked {
+		t.Error("mutating Diagnostics().Errors changed provider state")
+	}
+	if p.diagnostics.Collected[0] != "uuid" {
+		t.Error("mutating Diagnostics().Collected changed provider state")
+	}
+}
+
+func TestWithExecutorNilKeepsCurrent(t *testing.T) {
+	mock := newMockExecutor()
+	p := New().WithExecutor(mock).WithExecutor(nil)
+	if p.commandExecutor != mock {
+		t.Errorf("WithExecutor(nil) replaced the executor with %T", p.commandExecutor)
+	}
+}
+
+func TestIDCancelledContextDoesNotCollect(t *testing.T) {
+	mock := newMockExecutor()
+	p := New().WithExecutor(mock).WithCPU().WithSystemUUID().WithMotherboard()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := p.ID(ctx)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("ID() error = %v, want context.Canceled", err)
+	}
+	if p.cachedID != "" {
+		t.Error("ID() cached a value for a cancelled context")
+	}
+	if p.Diagnostics() != nil {
+		t.Error("ID() recorded diagnostics without collecting")
+	}
+}
+
+func TestHashIdentifiersDoesNotMutateInput(t *testing.T) {
+	ids := []string{"c", "a", "b"}
+	_ = hashIdentifiers(ids, "", Format64)
+	if strings.Join(ids, "") != "cab" {
+		t.Errorf("hashIdentifiers reordered its input: %v", ids)
+	}
 }
