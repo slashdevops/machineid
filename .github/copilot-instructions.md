@@ -27,6 +27,7 @@ Since this is a library build in native go, the files are mostly organized follo
 - LICENSE is the license file for the project.
 - README.md provides an overview of the project, installation instructions, usage examples, and other relevant information.
 - go.mod and go.sum manage the project's dependencies.
+- internal/selfupdate/ implements `machineid update`. It is CLI-only: the root library never imports it, makes no network requests and gains no dependencies from it.
 - \*.go files contain the main source code of the library.
 - \*\_test.go files contain the test cases for the library.
 

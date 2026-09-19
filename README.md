@@ -30,6 +30,7 @@ id, err := machineid.New().WithCPU().WithSystemUUID().ID(ctx)
 
 - [✨ Features](#-features)
 - [📦 Installation](#-installation)
+- [⬆️ Updating the CLI](#️-updating-the-cli)
 - [🚀 Quick start](#-quick-start)
 - [🖥️ CLI](#️-cli)
 - [📖 Library guide](#-library-guide)
@@ -115,7 +116,7 @@ unzip machineid.zip && sudo install -m 0755 machineid /usr/local/bin/machineid
 
 **🪟 Windows**: use `go install` above or build from source. Pre-built Windows binaries are not published yet.
 
-How to verify a download: [macOS signing and notarization](docs/macos-signing.md) and [Linux Sigstore verification](docs/linux-signing.md).
+How to verify a download: [macOS signing and notarization](docs/macos-signing.md) and [Linux Sigstore verification](docs/linux-signing.md). Already installed? See [Updating the CLI](#️-updating-the-cli).
 
 #### From source
 
@@ -125,6 +126,61 @@ cd machineid
 make build
 ./build/machineid -version
 ```
+
+---
+
+## ⬆️ Updating the CLI
+
+Once installed, the CLI updates itself. Full guide with per-platform details, script recipes and a troubleshooting table: **[docs/updating.md](docs/updating.md)**.
+
+```bash
+machineid update            # check, show the plan, ask, install
+machineid update -check     # what would happen, nothing changes
+machineid update -yes       # non-interactive (sudo on macOS for the .pkg)
+```
+
+It looks up the newest release, shows a checklist and the plan, asks for confirmation, downloads the asset for your platform, verifies its SHA-256 and signature, and replaces the binary you are running. Nothing is downloaded until every check has passed. Root is never requested; where it is needed (the macOS package) the exact `sudo` command is printed.
+
+```text
+$ machineid update
+Checking for updates…
+  ✓ current version          v0.2.0
+  ✓ running binary           /usr/local/bin/machineid
+  ✓ platform supported       darwin/arm64
+  ✓ latest release           v0.3.0  (live, 4 of 5 checks left this hour)
+  ✓ install target           /usr/local/bin (running as root)
+
+→ Updating machineid v0.2.0 → v0.3.0 using the signed macOS package
+
+Update machineid now? [y/N] y
+   downloading machineid-darwin-universal.pkg…
+   ✓ SHA-256 verified
+   ✓ pkgutil: Developer ID Installer: SlashDevOps
+   ✓ installed to /usr/local/bin
+
+✅ Updated to v0.3.0
+```
+
+| Flag | Meaning |
+|------|---------|
+| `-check` | Report what would happen and change nothing. Served from the cache when it is under an hour old. |
+| `-refresh` | Look up the latest release now instead of using the cache. |
+| `-version TAG` | Install a specific release, e.g. `-version v0.2.0`. This is also how to go back a version. |
+| `-method auto\|release\|go` | `release` installs the signed asset (default where one exists), `go` rebuilds with `go install`. |
+| `-force` | Install to the method's location even if this binary lives elsewhere, and reinstall an equal version. |
+| `-yes` | Do not ask for confirmation. Required when stdin is not a terminal. |
+| `-require-signature` | Fail unless the signature was verified: Sigstore via `cosign` on Linux, Apple's on macOS. Without the flag a missing `cosign` only prints a warning. |
+
+| Exit code | Meaning |
+|-----------|---------|
+| `0` | Updated, already current, `-check`, or you declined |
+| `1` | A prerequisite was not met. **Nothing was attempted.** Fix it and re-run. |
+| `2` | Invalid arguments |
+| `3` | The update was attempted and failed. A checksum failure leaves the old binary untouched. |
+
+**Where it installs.** The Linux zip and the macOS universal zip replace the binary in place, wherever it is. The macOS `.pkg` always installs to `/usr/local/bin` and needs root, so it is only chosen when that is where you are running from. `go install` always writes to `GOBIN`. If the chosen method would land somewhere else, the update refuses and tells you which flag targets your copy. Windows has no published binaries yet, so it uses `-method go`.
+
+**Network use and limits.** `machineid update` is the **only** thing in this tool that touches the network. Normal runs, `-validate` and `-version` never do, and there is no background check. The lookup asks `github.com` for the newest tag with a plain HTTPS request, without the GitHub API and without any token. The answer is cached for an hour and at most **5 live lookups per hour** are made per user, so a cron job running `machineid update -check` costs GitHub nothing after the first call. `MACHINEID_UPDATE_BUDGET` raises the limit if you must. Downloads only happen after you confirm a newer version.
 
 ---
 
@@ -451,7 +507,8 @@ Be deliberate about which of these your users are likely to do.
 - 🪪 The output contains no personally identifiable information.
 - ⏱️ Every system command has a timeout and is killed, together with its output pipes, when the context ends.
 - 🛡️ Firmware sentinels (nil and max UUIDs, "To be filled by O.E.M.") are rejected so they can never make two different machines share an ID.
-- 🔏 Release binaries are signed: Apple Developer ID plus notarization on macOS, Sigstore keyless signatures on Linux.
+- 🔏 Release binaries are signed: Apple Developer ID plus notarization on macOS, Sigstore keyless signatures on Linux. `machineid update` verifies both before installing.
+- 📴 The tool never makes a network request unless you run `machineid update`. There is no telemetry and no background update check.
 
 Please report vulnerabilities as described in [SECURITY.md](SECURITY.md).
 

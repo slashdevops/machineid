@@ -233,6 +233,18 @@ jobs:
             codesign --verify --verbose=4 "./dist/macos/${bin}"
           done
 
+      # The universal zip carries the same signed binary as the .pkg. It is
+      # what `machineid update` installs when the running binary does not
+      # live in /usr/local/bin (for example a `go install` copy).
+      - name: Create universal zip archives
+        run: |
+          mkdir -p ./dist/assets
+          for bin in machineid; do
+            zip --junk-paths "./dist/assets/${bin}-darwin-universal.zip" "./dist/macos/${bin}"
+            shasum -a 256 "./dist/assets/${bin}-darwin-universal.zip" \
+              | cut -d ' ' -f 1 > "./dist/assets/${bin}-darwin-universal.zip.sha256"
+          done
+
       - name: Create, sign, notarize & staple .pkg installers
         env:
           MACOS_INSTALLER_SIGNING_IDENTITY: ${{ secrets.MACOS_INSTALLER_SIGNING_IDENTITY }}

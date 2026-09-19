@@ -12,6 +12,20 @@ Thank you for your interest in contributing to machineid! This document provides
 
 Runnable examples are listed with `go doc -ex github.com/slashdevops/machineid`.
 
+### Release asset names are a contract
+
+`machineid update` downloads assets by name from the GitHub release. The names are pinned in
+`internal/selfupdate/asset_test.go`; renaming an asset in the Makefile or the release workflow
+fails that test on purpose. Today's names:
+
+| Platform | Asset | Checksum | Signature |
+|----------|-------|----------|-----------|
+| Linux amd64/arm64 | `machineid-linux-<arch>.zip` (contains `machineid`) | `machineid-linux-<arch>.sha256` | `machineid-linux-<arch>.sigstore.json` |
+| macOS | `machineid-darwin-universal.pkg` | `machineid-darwin-universal.sha256` | Apple Developer ID, notarized |
+| macOS (in-place updates) | `machineid-darwin-universal.zip` (contains `machineid`) | `machineid-darwin-universal.zip.sha256` | Apple codesign on the binary |
+
+If a name has to change, change the test and the updater together and note it in the release.
+
 ### Getting Started
 
 1. Fork the repository on GitHub

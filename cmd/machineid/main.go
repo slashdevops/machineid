@@ -12,6 +12,10 @@
 //
 // Exit codes: 0 success, 1 generation or validation failed, 2 invalid
 // arguments. Run machineid -h for the full flag list.
+//
+// The update verb, machineid update, replaces this binary with the latest
+// GitHub release. It is the only part of the program that uses the network
+// and it never runs unless asked. See machineid update -h.
 package main
 
 import (
@@ -19,6 +23,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -34,6 +39,12 @@ import (
 const applicationName = "machineid"
 
 func main() {
+	// `machineid update` is a verb, not a flag: it has its own flag set and
+	// is the only code path in this program that touches the network.
+	if isUpdateVerb(os.Args[1:]) {
+		os.Exit(runUpdate(os.Args[2:], os.Stdin, os.Stdout, os.Stderr))
+	}
+
 	// Hardware component flags
 	cpu := flag.Bool("cpu", false, "Include CPU identifier")
 	motherboard := flag.Bool("motherboard", false, "Include motherboard serial number")
@@ -184,7 +195,8 @@ func printUsage() {
 	fmt.Fprintf(w, "Usage:\n")
 	fmt.Fprintf(w, "  %s [-cpu] [-uuid] [-motherboard] [-mac] [-disk] [options]\n", applicationName)
 	fmt.Fprintf(w, "  %s -all [options]\n", applicationName)
-	fmt.Fprintf(w, "  %s -vm [options]\n\n", applicationName)
+	fmt.Fprintf(w, "  %s -vm [options]\n", applicationName)
+	fmt.Fprintf(w, "  %s update [options]        Update this binary to the latest release (see: %s update -h)\n\n", applicationName, applicationName)
 
 	fmt.Fprintf(w, "When no component flags are specified, the default is -cpu -motherboard -uuid.\n\n")
 
@@ -238,7 +250,7 @@ func printUsage() {
 	fmt.Fprintf(w, "  2  Invalid arguments\n")
 }
 
-func printFlag(w *os.File, name, desc string) {
+func printFlag(w io.Writer, name, desc string) {
 	fmt.Fprintf(w, "  %-20s %s\n", name, desc)
 }
 
