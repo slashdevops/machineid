@@ -405,7 +405,7 @@ func TestReadFirstValidFromLocationsSkipsInvalid(t *testing.T) {
 	if err := os.WriteFile(invalidPath, []byte("00000000-0000-0000-0000-000000000000\n"), 0o644); err != nil {
 		t.Fatalf("write invalid: %v", err)
 	}
-	if err := os.WriteFile(goodPath, []byte("real-uuid\n"), 0o644); err != nil {
+	if err := os.WriteFile(goodPath, []byte("E1B2C3D4-0008-4A5B-8C6D-7E8F9A0B1C2D\n"), 0o644); err != nil {
 		t.Fatalf("write good: %v", err)
 	}
 
@@ -413,8 +413,8 @@ func TestReadFirstValidFromLocationsSkipsInvalid(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
-	if value != "real-uuid" {
-		t.Errorf("Expected %q, got %q", "real-uuid", value)
+	if value != "E1B2C3D4-0008-4A5B-8C6D-7E8F9A0B1C2D" {
+		t.Errorf("Expected %q, got %q", "E1B2C3D4-0008-4A5B-8C6D-7E8F9A0B1C2D", value)
 	}
 }
 
