@@ -107,7 +107,7 @@ func AssetFor(goos, goarch string) (Asset, error) {
 
 // DarwinZipAsset is the universal macOS zip, for updating a binary that does
 // not live in [PkgInstallDir]. It carries the same signed and notarized
-// binary as the package. Published from v0.3.0 on.
+// binary as the package. Published from v0.2.0 on.
 func DarwinZipAsset() Asset {
 	base := ToolName + "-darwin-universal"
 

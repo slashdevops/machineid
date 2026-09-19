@@ -144,13 +144,13 @@ It looks up the newest release, shows a checklist and the plan, asks for confirm
 ```text
 $ machineid update
 Checking for updates…
-  ✓ current version          v0.2.0
+  ✓ current version          v0.1.3
   ✓ running binary           /usr/local/bin/machineid
   ✓ platform supported       darwin/arm64
-  ✓ latest release           v0.3.0  (live, 4 of 5 checks left this hour)
+  ✓ latest release           v0.2.0  (live, 4 of 5 checks left this hour)
   ✓ install target           /usr/local/bin (running as root)
 
-→ Updating machineid v0.2.0 → v0.3.0 using the signed macOS package
+→ Updating machineid v0.1.3 → v0.2.0 using the signed macOS package
 
 Update machineid now? [y/N] y
    downloading machineid-darwin-universal.pkg…
@@ -158,14 +158,14 @@ Update machineid now? [y/N] y
    ✓ pkgutil: Developer ID Installer: SlashDevOps
    ✓ installed to /usr/local/bin
 
-✅ Updated to v0.3.0
+✅ Updated to v0.2.0
 ```
 
 | Flag | Meaning |
 |------|---------|
 | `-check` | Report what would happen and change nothing. Served from the cache when it is under an hour old. |
 | `-refresh` | Look up the latest release now instead of using the cache. |
-| `-version TAG` | Install a specific release, e.g. `-version v0.2.0`. This is also how to go back a version. |
+| `-version TAG` | Install a specific release, e.g. `-version v0.1.3`. This is also how to go back a version. |
 | `-method auto\|release\|go` | `release` installs the signed asset (default where one exists), `go` rebuilds with `go install`. |
 | `-force` | Install to the method's location even if this binary lives elsewhere, and reinstall an equal version. |
 | `-yes` | Do not ask for confirmation. Required when stdin is not a terminal. |
