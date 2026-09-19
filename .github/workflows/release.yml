@@ -50,7 +50,7 @@ jobs:
           GIT_VERSION=${{ github.ref_name }} GO_OS="linux" make build-dist
 
       - name: Install Cosign
-        uses: sigstore/cosign-installer@v4
+        uses: sigstore/cosign-installer@v4.1.2
 
       - name: Sign Linux binaries with Cosign (keyless)
         run: |
