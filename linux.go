@@ -4,7 +4,6 @@ package machineid
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -84,39 +83,66 @@ func linuxCPUID(logger *slog.Logger) (string, error) {
 	return parseCPUInfo(string(data))
 }
 
-// parseCPUInfo extracts CPU information from /proc/cpuinfo content.
+// parseCPUInfo extracts a stable CPU identifier from /proc/cpuinfo content.
+//
+// The identifier is "vendor:model[:hardware]", built from the first processor
+// entry. It deliberately excludes the "flags" line, which gains entries after
+// kernel and microcode updates, and the processor index, which changes when a
+// VM is resized; both used to rotate the machine ID on routine maintenance.
+//
+// x86 kernels provide "vendor_id" and "model name". ARM kernels provide
+// "CPU implementer", "CPU part", "CPU variant" and "CPU revision" instead,
+// often with a "Hardware" line naming the board; those are used when the x86
+// fields are absent.
+//
 // Returns ErrNotFound when none of the expected fields are present, so an
 // empty or malformed /proc/cpuinfo does not silently contribute a fixed
-// all-colons string to the machine ID.
+// string to the machine ID.
 func parseCPUInfo(content string) (string, error) {
-	lines := strings.Split(content, "\n")
-	var processor, vendorID, modelName, flags string
+	fields := map[string]string{}
 
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		_, value, found := strings.Cut(line, ":")
+	for line := range strings.SplitSeq(content, "\n") {
+		key, value, found := strings.Cut(line, ":")
 		if !found {
 			continue
 		}
+		key = strings.ToLower(strings.TrimSpace(key))
 		value = strings.TrimSpace(value)
-
-		switch {
-		case strings.HasPrefix(line, "processor"):
-			processor = value
-		case strings.HasPrefix(line, "vendor_id"):
-			vendorID = value
-		case strings.HasPrefix(line, "model name"):
-			modelName = value
-		case strings.HasPrefix(line, "flags"):
-			flags = value
+		if value == "" {
+			continue
+		}
+		// First occurrence wins: every core repeats the same values.
+		if _, seen := fields[key]; !seen {
+			fields[key] = value
 		}
 	}
 
-	if processor == "" && vendorID == "" && modelName == "" && flags == "" {
+	vendor := fields["vendor_id"]
+	if vendor == "" {
+		vendor = fields["cpu implementer"]
+	}
+
+	model := fields["model name"]
+	if model == "" {
+		var parts []string
+		for _, key := range []string{"cpu part", "cpu variant", "cpu revision"} {
+			if v := fields[key]; v != "" {
+				parts = append(parts, v)
+			}
+		}
+		model = strings.Join(parts, "/")
+	}
+
+	if vendor == "" && model == "" {
 		return "", &ParseError{Source: "/proc/cpuinfo", Err: ErrNotFound}
 	}
 
-	return fmt.Sprintf("%s:%s:%s:%s", processor, vendorID, modelName, flags), nil
+	id := vendor + ":" + model
+	if hw := fields["hardware"]; hw != "" {
+		id += ":" + hw
+	}
+
+	return id, nil
 }
 
 // linuxSystemUUID retrieves system UUID from DMI.
@@ -249,29 +275,74 @@ func linuxDiskSerials(ctx context.Context, executor CommandExecutor, logger *slo
 	return serials, nil
 }
 
-// linuxDiskSerialsLSBLK retrieves disk serials using lsblk command.
-// OEM placeholder strings are filtered out.
+// linuxDiskSerialsLSBLK retrieves the serials of fixed disks using lsblk.
+//
+// Removable devices (USB sticks, SD cards) and non-disk devices (optical
+// drives, loop devices) are excluded: plugging one in must not change the
+// machine ID. OEM placeholder strings are filtered out.
 func linuxDiskSerialsLSBLK(ctx context.Context, executor CommandExecutor, logger *slog.Logger) ([]string, error) {
-	output, err := executeCommand(ctx, executor, logger, "lsblk", "-d", "-n", "-o", "SERIAL")
+	output, err := executeCommand(ctx, executor, logger, "lsblk", "-d", "-n", "-P", "-o", "NAME,TYPE,RM,SERIAL")
 	if err != nil {
 		return nil, err
 	}
 
 	var serials []string
-	lines := strings.SplitSeq(output, "\n")
-	for line := range lines {
-		serial := strings.TrimSpace(line)
-		if !isValidSerial(serial) {
+	for line := range strings.SplitSeq(output, "\n") {
+		dev := parseKeyValueLine(line)
+		if len(dev) == 0 {
 			continue
 		}
-		serials = append(serials, serial)
+
+		if dev["TYPE"] != "disk" || dev["RM"] == "1" {
+			if logger != nil {
+				logger.Debug("skipping block device", "name", dev["NAME"], "type", dev["TYPE"], "removable", dev["RM"])
+			}
+
+			continue
+		}
+
+		if serial := dev["SERIAL"]; isValidSerial(serial) {
+			serials = append(serials, serial)
+		}
 	}
 
 	return serials, nil
 }
 
-// linuxDiskSerialsSys retrieves disk serials from /sys/block.
-// OEM placeholder strings are filtered out.
+// parseKeyValueLine parses lsblk -P output: KEY="value" pairs separated by spaces.
+func parseKeyValueLine(line string) map[string]string {
+	fields := map[string]string{}
+	rest := strings.TrimSpace(line)
+
+	for rest != "" {
+		key, after, ok := strings.Cut(rest, "=\"")
+		if !ok {
+			break
+		}
+		value, remainder, ok := strings.Cut(after, "\"")
+		if !ok {
+			break
+		}
+		fields[strings.TrimSpace(key)] = value
+		rest = strings.TrimSpace(remainder)
+	}
+
+	return fields
+}
+
+// virtualBlockPrefixes name block devices that are never fixed disks.
+var virtualBlockPrefixes = []string{"loop", "ram", "zram", "dm-", "md", "sr", "fd", "nbd", "mtd"}
+
+// isRemovableBlockDevice reports whether /sys/block/<name>/removable is set.
+func isRemovableBlockDevice(name string) bool {
+	data, err := os.ReadFile(filepath.Join(sysBlockDir, name, "removable"))
+
+	return err == nil && strings.TrimSpace(string(data)) == "1"
+}
+
+// linuxDiskSerialsSys retrieves the serials of fixed disks from /sys/block.
+// Virtual and removable block devices are skipped; OEM placeholder strings
+// are filtered out.
 func linuxDiskSerialsSys(logger *slog.Logger) ([]string, error) {
 	var serials []string
 
@@ -281,19 +352,32 @@ func linuxDiskSerialsSys(logger *slog.Logger) ([]string, error) {
 	}
 
 	for _, entry := range entries {
-		if entry.IsDir() && !strings.HasPrefix(entry.Name(), "loop") {
-			serialFile := filepath.Join(sysBlockDir, entry.Name(), "device", "serial")
-			if data, err := os.ReadFile(serialFile); err == nil {
-				serial := strings.TrimSpace(string(data))
-				if !isValidSerial(serial) {
-					continue
-				}
-				serials = append(serials, serial)
-
-				if logger != nil {
-					logger.Debug("read disk serial from sysfs", "disk", entry.Name(), "path", serialFile)
-				}
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if hasAnyPrefix(name, virtualBlockPrefixes) || isRemovableBlockDevice(name) {
+			if logger != nil {
+				logger.Debug("skipping block device", "disk", name)
 			}
+
+			continue
+		}
+
+		serialFile := filepath.Join(sysBlockDir, name, "device", "serial")
+		data, err := os.ReadFile(serialFile)
+		if err != nil {
+			continue
+		}
+
+		serial := strings.TrimSpace(string(data))
+		if !isValidSerial(serial) {
+			continue
+		}
+		serials = append(serials, serial)
+
+		if logger != nil {
+			logger.Debug("read disk serial from sysfs", "disk", name, "path", serialFile)
 		}
 	}
 

@@ -125,6 +125,61 @@ func parseWmicMultipleValues(output, prefix string) []string {
 	return values
 }
 
+// parseWmicBlocks splits wmic /value output into one key=value map per
+// instance. Instances are separated by blank lines.
+func parseWmicBlocks(output string) []map[string]string {
+	var blocks []map[string]string
+	current := map[string]string{}
+
+	flush := func() {
+		if len(current) > 0 {
+			blocks = append(blocks, current)
+			current = map[string]string{}
+		}
+	}
+
+	for line := range strings.SplitSeq(output, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			flush()
+
+			continue
+		}
+		if key, value, ok := strings.Cut(line, "="); ok {
+			current[strings.TrimSpace(key)] = strings.TrimSpace(value)
+		}
+	}
+	flush()
+
+	return blocks
+}
+
+// parseWmicFixedDiskSerials extracts the serials of fixed, non-USB disks from
+// `wmic diskdrive get InterfaceType,MediaType,SerialNumber /value` output.
+// Instances without the type fields (older wmic output) are kept.
+func parseWmicFixedDiskSerials(output string, logger *slog.Logger) []string {
+	var serials []string
+
+	for _, disk := range parseWmicBlocks(output) {
+		media := strings.ToLower(disk["MediaType"])
+		if strings.EqualFold(disk["InterfaceType"], "USB") || strings.Contains(media, "removable") || strings.Contains(media, "external") {
+			if logger != nil {
+				logger.Debug("skipping removable disk", "interface", disk["InterfaceType"], "media", disk["MediaType"])
+			}
+
+			continue
+		}
+
+		serial := disk["SerialNumber"]
+		if serial == "" || serial == biosFirmwareMessage {
+			continue
+		}
+		serials = append(serials, serial)
+	}
+
+	return serials
+}
+
 // parsePowerShellValue extracts a trimmed, non-empty value from PowerShell output.
 // OEM placeholder strings (see biosFirmwareMessage) are rejected with ErrOEMPlaceholder.
 func parsePowerShellValue(output string) (string, error) {
@@ -274,12 +329,19 @@ func windowsSystemUUIDViaPowerShell(ctx context.Context, executor CommandExecuto
 	return value, nil
 }
 
-// windowsDiskSerials retrieves disk serial numbers using wmic, with PowerShell fallback.
+// fixedDiskPowerShell lists the serials of fixed, non-USB disks.
+const fixedDiskPowerShell = "Get-CimInstance -ClassName Win32_DiskDrive | " +
+	"Where-Object { $_.InterfaceType -ne 'USB' -and $_.MediaType -notlike '*emovable*' -and $_.MediaType -notlike '*xternal*' } | " +
+	"Select-Object -ExpandProperty SerialNumber"
+
+// windowsDiskSerials retrieves the serials of fixed disks using wmic, with
+// PowerShell fallback. USB and removable media are excluded so plugging in a
+// drive does not change the machine ID.
 func windowsDiskSerials(ctx context.Context, executor CommandExecutor, logger *slog.Logger) ([]string, error) {
 	if wmicAvailable(logger) {
-		output, err := executeCommand(ctx, executor, logger, "wmic", "diskdrive", "get", "SerialNumber", "/value")
+		output, err := executeCommand(ctx, executor, logger, "wmic", "diskdrive", "get", "InterfaceType,MediaType,SerialNumber", "/value")
 		if err == nil {
-			if values := parseWmicMultipleValues(output, "SerialNumber="); len(values) > 0 {
+			if values := parseWmicFixedDiskSerials(output, logger); len(values) > 0 {
 				return values, nil
 			}
 
@@ -294,8 +356,7 @@ func windowsDiskSerials(ctx context.Context, executor CommandExecutor, logger *s
 		logger.Info("falling back to PowerShell for disk serials")
 	}
 
-	psOutput, psErr := runPowerShell(ctx, executor, logger,
-		"Get-CimInstance -ClassName Win32_DiskDrive | Select-Object -ExpandProperty SerialNumber")
+	psOutput, psErr := runPowerShell(ctx, executor, logger, fixedDiskPowerShell)
 	if psErr != nil {
 		if logger != nil {
 			logger.Warn("all disk serial methods failed")

@@ -127,7 +127,10 @@ func (p *Provider) WithFormat(mode FormatMode) *Provider {
 	return p
 }
 
-// WithCPU includes the CPU identifier in the generation.
+// WithCPU includes the CPU identifier in the generation: the processor ID on
+// Windows, the brand string on macOS, and the vendor and model on Linux.
+// Volatile details such as the Linux feature-flags line are deliberately
+// excluded so routine kernel and microcode updates do not change the ID.
 func (p *Provider) WithCPU() *Provider {
 	p.includeCPU = true
 

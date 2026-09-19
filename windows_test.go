@@ -501,9 +501,14 @@ func TestWindowsSystemUUIDViaPowerShellOEMPlaceholder(t *testing.T) {
 
 // --- windowsDiskSerials tests ---
 
+// wmicDisk renders one instance of `wmic diskdrive get InterfaceType,MediaType,SerialNumber /value`.
+func wmicDisk(iface, media, serial string) string {
+	return "\r\n\r\nInterfaceType=" + iface + "\r\nMediaType=" + media + "\r\nSerialNumber=" + serial + "\r\n"
+}
+
 func TestWindowsDiskSerialsWmicSuccess(t *testing.T) {
 	mock := newMockExecutor()
-	mock.setOutput("wmic", "SerialNumber=WD-12345\r\nSerialNumber=WD-67890\r\n")
+	mock.setOutput("wmic", wmicDisk("SCSI", "Fixed hard disk media", "WD-12345")+wmicDisk("SCSI", "Fixed hard disk media", "WD-67890"))
 
 	result, err := windowsDiskSerials(context.Background(), mock, nil)
 	if err != nil {
@@ -514,6 +519,44 @@ func TestWindowsDiskSerialsWmicSuccess(t *testing.T) {
 	}
 	if result[0] != "WD-12345" || result[1] != "WD-67890" {
 		t.Errorf("Unexpected serials: %v", result)
+	}
+}
+
+// TestWindowsDiskSerialsWmicSkipsRemovable verifies that USB and removable
+// media never contribute: plugging in a drive must not change the machine ID.
+func TestWindowsDiskSerialsWmicSkipsRemovable(t *testing.T) {
+	mock := newMockExecutor()
+	mock.setOutput("wmic",
+		wmicDisk("SCSI", "Fixed hard disk media", "FIXED-1")+
+			wmicDisk("USB", "Removable Media", "USB-STICK")+
+			wmicDisk("SCSI", "External hard disk media", "EXTERNAL")+
+			wmicDisk("USB", "Fixed hard disk media", "USB-HDD")+
+			wmicDisk("IDE", "Fixed hard disk media", "FIXED-2"))
+
+	result, err := windowsDiskSerials(context.Background(), mock, nil)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if len(result) != 2 || result[0] != "FIXED-1" || result[1] != "FIXED-2" {
+		t.Errorf("Expected [FIXED-1 FIXED-2], got %v", result)
+	}
+}
+
+func TestParseWmicFixedDiskSerialsLegacyOutput(t *testing.T) {
+	// Instances without the type fields are kept.
+	got := parseWmicFixedDiskSerials("SerialNumber=A\r\n\r\nSerialNumber=B\r\n", nil)
+	if len(got) != 2 || got[0] != "A" || got[1] != "B" {
+		t.Errorf("got %v", got)
+	}
+}
+
+func TestParseWmicBlocks(t *testing.T) {
+	blocks := parseWmicBlocks("\r\nA=1\r\nB=2\r\n\r\n\r\nA=3\r\n")
+	if len(blocks) != 2 || blocks[0]["A"] != "1" || blocks[0]["B"] != "2" || blocks[1]["A"] != "3" {
+		t.Errorf("parseWmicBlocks = %v", blocks)
+	}
+	if len(parseWmicBlocks("")) != 0 {
+		t.Error("empty output should yield no blocks")
 	}
 }
 
@@ -594,7 +637,7 @@ func TestWindowsDiskSerialsPowerShellAllOEM(t *testing.T) {
 
 func TestWindowsDiskSerialsWmicEmptyFallback(t *testing.T) {
 	mock := newMockExecutor()
-	mock.setOutput("wmic", "SerialNumber=\r\n") // wmic returns empty serials
+	mock.setOutput("wmic", wmicDisk("SCSI", "Fixed hard disk media", "")) // wmic returns empty serials
 	mock.setOutput("powershell", "WD-FALLBACK")
 
 	result, err := windowsDiskSerials(context.Background(), mock, nil)
@@ -611,7 +654,7 @@ func TestWindowsDiskSerialsWithLogger(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
 	mock := newMockExecutor()
-	mock.setOutput("wmic", "SerialNumber=\r\n")
+	mock.setOutput("wmic", wmicDisk("SCSI", "Fixed hard disk media", ""))
 	mock.setOutput("powershell", "WD-LOG")
 
 	_, err := windowsDiskSerials(context.Background(), mock, logger)

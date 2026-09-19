@@ -26,7 +26,7 @@
 //
 // Enable individual hardware components via the With* methods:
 //
-//   - [Provider.WithCPU] — processor identifier and feature flags
+//   - [Provider.WithCPU] — processor identifier (vendor and model; no volatile feature flags)
 //   - [Provider.WithMotherboard] — motherboard / baseboard serial number
 //   - [Provider.WithSystemUUID] — BIOS / UEFI system UUID
 //   - [Provider.WithMAC] — MAC addresses of network interfaces (filterable)
