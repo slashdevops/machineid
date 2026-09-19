@@ -17,11 +17,6 @@ var (
 	ioregSerialRe = regexp.MustCompile(`"IOPlatformSerialNumber"\s*=\s*"([^"]+)"`)
 )
 
-// nullUUID is the all-zero UUID that some firmware implementations return
-// when no real hardware UUID is programmed. It must be rejected so it
-// cannot contribute to the machine ID.
-const nullUUID = "00000000-0000-0000-0000-000000000000"
-
 // spHardwareDataType represents the JSON output of `system_profiler SPHardwareDataType -json`.
 type spHardwareDataType struct {
 	SPHardwareDataType []spHardwareEntry `json:"SPHardwareDataType"`
@@ -56,46 +51,57 @@ type spPhysicalDrive struct {
 	SmartStatus string `json:"smart_status"`
 }
 
-// collectIdentifiers gathers macOS-specific hardware identifiers based on provider config.
+// collectIdentifiers gathers macOS-specific hardware identifiers concurrently.
+// The UUID, serial and CPU collectors all read
+// `system_profiler SPHardwareDataType -json`, the slowest command involved,
+// so the executor is wrapped in a per-call memo and that process runs once.
 func collectIdentifiers(ctx context.Context, p *Provider, diag *DiagnosticInfo) ([]string, error) {
-	var identifiers []string
 	logger := p.logger
+	executor := newMemoExecutor(p.commandExecutor, logger)
+
+	var tasks []componentTask
 
 	if p.includeSystemUUID {
-		identifiers = appendIdentifierIfValid(identifiers, func() (string, error) {
-			return macOSHardwareUUID(ctx, p.commandExecutor, logger)
-		}, "uuid:", diag, ComponentSystemUUID, logger)
+		tasks = append(tasks, componentTask{component: ComponentSystemUUID, prefix: "uuid:",
+			single: func(ctx context.Context) (string, error) {
+				return macOSHardwareUUID(ctx, executor, logger)
+			}})
 	}
 
 	if p.includeMotherboard {
-		identifiers = appendIdentifierIfValid(identifiers, func() (string, error) {
-			return macOSSerialNumber(ctx, p.commandExecutor, logger)
-		}, "serial:", diag, ComponentMotherboard, logger)
+		tasks = append(tasks, componentTask{component: ComponentMotherboard, prefix: "serial:",
+			single: func(ctx context.Context) (string, error) {
+				return macOSSerialNumber(ctx, executor, logger)
+			}})
 	}
 
 	if p.includeCPU {
-		identifiers = appendIdentifierIfValid(identifiers, func() (string, error) {
-			return macOSCPUInfo(ctx, p.commandExecutor, logger)
-		}, "cpu:", diag, ComponentCPU, logger)
+		tasks = append(tasks, componentTask{component: ComponentCPU, prefix: "cpu:",
+			single: func(ctx context.Context) (string, error) {
+				return macOSCPUInfo(ctx, executor, logger)
+			}})
 	}
 
 	if p.includeMAC {
-		identifiers = appendIdentifiersIfValid(identifiers, func() ([]string, error) {
-			return collectMACAddresses(p.macFilter, logger)
-		}, "mac:", diag, ComponentMAC, logger)
+		tasks = append(tasks, componentTask{component: ComponentMAC, prefix: "mac:",
+			multi: func(context.Context) ([]string, error) {
+				return collectMACAddresses(p.macFilter, logger)
+			}})
 	}
 
 	if p.includeDisk {
-		identifiers = appendIdentifiersIfValid(identifiers, func() ([]string, error) {
-			return macOSDiskInfo(ctx, p.commandExecutor, logger)
-		}, "disk:", diag, ComponentDisk, logger)
+		tasks = append(tasks, componentTask{component: ComponentDisk, prefix: "disk:",
+			multi: func(ctx context.Context) ([]string, error) {
+				return macOSDiskInfo(ctx, executor, logger)
+			}})
 	}
 
-	return identifiers, nil
+	return runComponentTasks(ctx, tasks, diag, logger), nil
 }
 
 // macOSHardwareUUID retrieves hardware UUID using system_profiler with JSON parsing.
-// Null UUIDs (all zeros) are rejected so the fallback path is triggered.
+// Malformed, nil (all zeros) and max (all ones) UUIDs are rejected so the
+// fallback path is triggered.
 func macOSHardwareUUID(ctx context.Context, executor CommandExecutor, logger *slog.Logger) (string, error) {
 	output, err := executeCommand(ctx, executor, logger, "system_profiler", "SPHardwareDataType", "-json")
 	if err == nil {
@@ -103,12 +109,12 @@ func macOSHardwareUUID(ctx context.Context, executor CommandExecutor, logger *sl
 			return e.PlatformUUID
 		})
 		if parseErr == nil {
-			if uuid == nullUUID {
-				if logger != nil {
-					logger.Debug("system_profiler returned null UUID, falling back")
-				}
-			} else {
+			if isValidUUID(uuid) {
 				return uuid, nil
+			}
+
+			if logger != nil {
+				logger.Debug("system_profiler returned invalid UUID, falling back", "uuid", uuid)
 			}
 		} else if logger != nil {
 			logger.Debug("system_profiler UUID parsing failed", "error", parseErr)
@@ -124,7 +130,7 @@ func macOSHardwareUUID(ctx context.Context, executor CommandExecutor, logger *sl
 }
 
 // macOSHardwareUUIDViaIOReg retrieves hardware UUID using ioreg as fallback.
-// Null UUIDs (all zeros) are rejected with ErrNotFound.
+// Malformed, nil and max UUIDs are rejected with ErrNotFound.
 func macOSHardwareUUIDViaIOReg(ctx context.Context, executor CommandExecutor, logger *slog.Logger) (string, error) {
 	output, err := executeCommand(ctx, executor, logger, "ioreg", "-d2", "-c", "IOPlatformExpertDevice")
 	if err != nil {
@@ -133,9 +139,9 @@ func macOSHardwareUUIDViaIOReg(ctx context.Context, executor CommandExecutor, lo
 
 	match := ioregUUIDRe.FindStringSubmatch(output)
 	if len(match) > 1 {
-		if match[1] == nullUUID {
+		if !isValidUUID(match[1]) {
 			if logger != nil {
-				logger.Debug("ioreg returned null UUID")
+				logger.Debug("ioreg returned invalid UUID", "uuid", match[1])
 			}
 
 			return "", &ParseError{Source: "ioreg output", Err: ErrNotFound}

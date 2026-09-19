@@ -16,7 +16,7 @@ import (
 func TestExtractHardwareFieldValid(t *testing.T) {
 	jsonOutput := `{
 		"SPHardwareDataType": [{
-			"platform_UUID": "12345-67890",
+			"platform_UUID": "E1B2C3D4-0001-4A5B-8C6D-7E8F9A0B1C2D",
 			"serial_number": "C02TEST123",
 			"chip_type": "Apple M1 Pro",
 			"machine_model": "MacBookPro18,3"
@@ -28,8 +28,8 @@ func TestExtractHardwareFieldValid(t *testing.T) {
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
 	}
-	if result != "12345-67890" {
-		t.Errorf("Expected '12345-67890', got '%s'", result)
+	if result != "E1B2C3D4-0001-4A5B-8C6D-7E8F9A0B1C2D" {
+		t.Errorf("Expected 'E1B2C3D4-0001-4A5B-8C6D-7E8F9A0B1C2D', got '%s'", result)
 	}
 }
 
@@ -98,7 +98,7 @@ func TestMacOSHardwareUUIDViaIORegSuccess(t *testing.T) {
 	ioregOutput := `
 	+-o IOPlatformExpertDevice
 	  | {
-	  |   "IOPlatformUUID" = "ABCD-1234-EFGH-5678"
+	  |   "IOPlatformUUID" = "E1B2C3D4-0002-4A5B-8C6D-7E8F9A0B1C2D"
 	  | }
 	`
 	mock.setOutput("ioreg", ioregOutput)
@@ -107,8 +107,8 @@ func TestMacOSHardwareUUIDViaIORegSuccess(t *testing.T) {
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
 	}
-	if result != "ABCD-1234-EFGH-5678" {
-		t.Errorf("Expected 'ABCD-1234-EFGH-5678', got '%s'", result)
+	if result != "E1B2C3D4-0002-4A5B-8C6D-7E8F9A0B1C2D" {
+		t.Errorf("Expected 'E1B2C3D4-0002-4A5B-8C6D-7E8F9A0B1C2D', got '%s'", result)
 	}
 }
 
@@ -354,14 +354,14 @@ func TestMacOSHardwareUUIDWithLogger(t *testing.T) {
 
 		mock := newMockExecutor()
 		mock.setOutput("system_profiler", "not json") // Will cause parse error
-		mock.setOutput("ioreg", `"IOPlatformUUID" = "FALLBACK-UUID-123"`)
+		mock.setOutput("ioreg", `"IOPlatformUUID" = "E1B2C3D4-0003-4A5B-8C6D-7E8F9A0B1C2D"`)
 
 		result, err := macOSHardwareUUID(context.Background(), mock, logger)
 		if err != nil {
 			t.Fatalf("Unexpected error: %v", err)
 		}
-		if result != "FALLBACK-UUID-123" {
-			t.Errorf("Expected 'FALLBACK-UUID-123', got %q", result)
+		if result != "E1B2C3D4-0003-4A5B-8C6D-7E8F9A0B1C2D" {
+			t.Errorf("Expected 'E1B2C3D4-0003-4A5B-8C6D-7E8F9A0B1C2D', got %q", result)
 		}
 		if !bytes.Contains(buf.Bytes(), []byte("system_profiler UUID parsing failed")) {
 			t.Error("Expected 'system_profiler UUID parsing failed' in log output")
@@ -377,14 +377,14 @@ func TestMacOSHardwareUUIDWithLogger(t *testing.T) {
 
 		mock := newMockExecutor()
 		mock.setError("system_profiler", fmt.Errorf("command failed"))
-		mock.setOutput("ioreg", `"IOPlatformUUID" = "FALLBACK-UUID-456"`)
+		mock.setOutput("ioreg", `"IOPlatformUUID" = "E1B2C3D4-0004-4A5B-8C6D-7E8F9A0B1C2D"`)
 
 		result, err := macOSHardwareUUID(context.Background(), mock, logger)
 		if err != nil {
 			t.Fatalf("Unexpected error: %v", err)
 		}
-		if result != "FALLBACK-UUID-456" {
-			t.Errorf("Expected 'FALLBACK-UUID-456', got %q", result)
+		if result != "E1B2C3D4-0004-4A5B-8C6D-7E8F9A0B1C2D" {
+			t.Errorf("Expected 'E1B2C3D4-0004-4A5B-8C6D-7E8F9A0B1C2D', got %q", result)
 		}
 		if !bytes.Contains(buf.Bytes(), []byte("falling back to ioreg for hardware UUID")) {
 			t.Error("Expected fallback log message")
@@ -658,8 +658,8 @@ func TestExtractHardwareFieldErrorTypes(t *testing.T) {
 		_, err := extractHardwareField("not json", func(e spHardwareEntry) string {
 			return e.PlatformUUID
 		})
-		var parseErr *ParseError
-		if !errors.As(err, &parseErr) {
+		parseErr, ok := errors.AsType[*ParseError](err)
+		if !ok {
 			t.Fatalf("Expected ParseError, got %T: %v", err, err)
 		}
 		if parseErr.Source != "system_profiler hardware JSON" {
@@ -671,8 +671,7 @@ func TestExtractHardwareFieldErrorTypes(t *testing.T) {
 		_, err := extractHardwareField(`{"SPHardwareDataType": []}`, func(e spHardwareEntry) string {
 			return e.PlatformUUID
 		})
-		var parseErr *ParseError
-		if !errors.As(err, &parseErr) {
+		if _, ok := errors.AsType[*ParseError](err); !ok {
 			t.Fatalf("Expected ParseError, got %T: %v", err, err)
 		}
 		if !errors.Is(err, ErrNotFound) {
@@ -684,8 +683,7 @@ func TestExtractHardwareFieldErrorTypes(t *testing.T) {
 		_, err := extractHardwareField(`{"SPHardwareDataType": [{"platform_UUID": ""}]}`, func(e spHardwareEntry) string {
 			return e.PlatformUUID
 		})
-		var parseErr *ParseError
-		if !errors.As(err, &parseErr) {
+		if _, ok := errors.AsType[*ParseError](err); !ok {
 			t.Fatalf("Expected ParseError, got %T: %v", err, err)
 		}
 		if !errors.Is(err, ErrEmptyValue) {
@@ -701,8 +699,7 @@ func TestMacOSHardwareUUIDViaIORegErrorType(t *testing.T) {
 
 	_, err := macOSHardwareUUIDViaIOReg(context.Background(), mock, nil)
 
-	var parseErr *ParseError
-	if !errors.As(err, &parseErr) {
+	if _, ok := errors.AsType[*ParseError](err); !ok {
 		t.Fatalf("Expected ParseError, got %T: %v", err, err)
 	}
 	if !errors.Is(err, ErrNotFound) {
@@ -734,14 +731,14 @@ func TestMacOSHardwareUUIDRejectsNullFromSystemProfiler(t *testing.T) {
 			"serial_number": "C02TEST"
 		}]
 	}`)
-	mock.setOutput("ioreg", `"IOPlatformUUID" = "REAL-UUID-FROM-IOREG"`)
+	mock.setOutput("ioreg", `"IOPlatformUUID" = "E1B2C3D4-0005-4A5B-8C6D-7E8F9A0B1C2D"`)
 
 	result, err := macOSHardwareUUID(context.Background(), mock, nil)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
-	if result != "REAL-UUID-FROM-IOREG" {
-		t.Errorf("Expected 'REAL-UUID-FROM-IOREG', got %q", result)
+	if result != "E1B2C3D4-0005-4A5B-8C6D-7E8F9A0B1C2D" {
+		t.Errorf("Expected 'E1B2C3D4-0005-4A5B-8C6D-7E8F9A0B1C2D', got %q", result)
 	}
 }
 
@@ -755,13 +752,13 @@ func TestMacOSHardwareUUIDRejectsNullFromSystemProfilerWithLogger(t *testing.T) 
 			"platform_UUID": "00000000-0000-0000-0000-000000000000"
 		}]
 	}`)
-	mock.setOutput("ioreg", `"IOPlatformUUID" = "REAL-UUID"`)
+	mock.setOutput("ioreg", `"IOPlatformUUID" = "E1B2C3D4-0006-4A5B-8C6D-7E8F9A0B1C2D"`)
 
 	if _, err := macOSHardwareUUID(context.Background(), mock, logger); err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
-	if !bytes.Contains(buf.Bytes(), []byte("system_profiler returned null UUID")) {
-		t.Error("Expected 'system_profiler returned null UUID' log")
+	if !bytes.Contains(buf.Bytes(), []byte("system_profiler returned invalid UUID")) {
+		t.Error("Expected 'system_profiler returned invalid UUID' log")
 	}
 }
 
@@ -775,8 +772,7 @@ func TestMacOSHardwareUUIDViaIORegRejectsNull(t *testing.T) {
 	if err == nil {
 		t.Fatal("Expected error for null UUID from ioreg")
 	}
-	var parseErr *ParseError
-	if !errors.As(err, &parseErr) {
+	if _, ok := errors.AsType[*ParseError](err); !ok {
 		t.Errorf("Expected ParseError, got %T", err)
 	}
 	if !errors.Is(err, ErrNotFound) {

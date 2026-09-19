@@ -5,165 +5,86 @@ package machineid
 import (
 	"context"
 	"log/slog"
+	"os/exec"
 	"strings"
-	"sync"
 )
 
-// componentResult holds the result from a single concurrent component collection.
-type componentResult struct {
-	component string
-	prefix    string
-	value     string   // for single-value components
-	values    []string // for multi-value components (MAC, disk)
-	err       error
-	multi     bool // true if this is a multi-value result
-}
+// lookPath resolves a command on PATH. It is a variable so tests can force
+// the wmic probe to a known outcome regardless of the host.
+var lookPath = exec.LookPath
+
+// powerShellArgs precede every PowerShell script. -NoProfile keeps user
+// profiles from writing to stdout (which would corrupt parsed values) and
+// from slowing start-up; -NonInteractive prevents prompts from blocking.
+var powerShellArgs = []string{"-NoProfile", "-NonInteractive", "-Command"}
 
 // collectIdentifiers gathers Windows-specific hardware identifiers concurrently.
 // Windows commands (wmic, PowerShell) are slow due to process startup overhead,
 // so all components are collected in parallel to minimize total latency.
 func collectIdentifiers(ctx context.Context, p *Provider, diag *DiagnosticInfo) ([]string, error) {
 	logger := p.logger
+	executor := p.commandExecutor
 
-	var wg sync.WaitGroup
-	resultsCh := make(chan componentResult, 5)
+	var tasks []componentTask
 
 	if p.includeCPU {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			value, err := windowsCPUID(ctx, p.commandExecutor, logger)
-			resultsCh <- componentResult{component: ComponentCPU, prefix: "cpu:", value: value, err: err}
-		}()
+		tasks = append(tasks, componentTask{component: ComponentCPU, prefix: "cpu:",
+			single: func(ctx context.Context) (string, error) {
+				return windowsCPUID(ctx, executor, logger)
+			}})
 	}
 
 	if p.includeMotherboard {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			value, err := windowsMotherboardSerial(ctx, p.commandExecutor, logger)
-			resultsCh <- componentResult{component: ComponentMotherboard, prefix: "mb:", value: value, err: err}
-		}()
+		tasks = append(tasks, componentTask{component: ComponentMotherboard, prefix: "mb:",
+			single: func(ctx context.Context) (string, error) {
+				return windowsMotherboardSerial(ctx, executor, logger)
+			}})
 	}
 
 	if p.includeSystemUUID {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			value, err := windowsSystemUUID(ctx, p.commandExecutor, logger)
-			resultsCh <- componentResult{component: ComponentSystemUUID, prefix: "uuid:", value: value, err: err}
-		}()
+		tasks = append(tasks, componentTask{component: ComponentSystemUUID, prefix: "uuid:",
+			single: func(ctx context.Context) (string, error) {
+				return windowsSystemUUID(ctx, executor, logger)
+			}})
 	}
 
 	if p.includeMAC {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			values, err := collectMACAddresses(p.macFilter, logger)
-			resultsCh <- componentResult{component: ComponentMAC, prefix: "mac:", values: values, err: err, multi: true}
-		}()
+		tasks = append(tasks, componentTask{component: ComponentMAC, prefix: "mac:",
+			multi: func(context.Context) ([]string, error) {
+				return collectMACAddresses(p.macFilter, logger)
+			}})
 	}
 
 	if p.includeDisk {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			values, err := windowsDiskSerials(ctx, p.commandExecutor, logger)
-			resultsCh <- componentResult{component: ComponentDisk, prefix: "disk:", values: values, err: err, multi: true}
-		}()
+		tasks = append(tasks, componentTask{component: ComponentDisk, prefix: "disk:",
+			multi: func(ctx context.Context) ([]string, error) {
+				return windowsDiskSerials(ctx, executor, logger)
+			}})
 	}
 
-	// Close channel once all goroutines complete.
-	go func() {
-		wg.Wait()
-		close(resultsCh)
-	}()
-
-	// Collect results and build identifiers.
-	var identifiers []string
-	for r := range resultsCh {
-		if r.multi {
-			identifiers = appendMultiResult(identifiers, r, diag, logger)
-		} else {
-			identifiers = appendSingleResult(identifiers, r, diag, logger)
-		}
-	}
-
-	return identifiers, nil
+	return runComponentTasks(ctx, tasks, diag, logger), nil
 }
 
-// appendSingleResult processes a single-value component result into identifiers.
-func appendSingleResult(identifiers []string, r componentResult, diag *DiagnosticInfo, logger *slog.Logger) []string {
-	if r.err != nil {
-		compErr := &ComponentError{Component: r.component, Err: r.err}
-		if diag != nil {
-			diag.Errors[r.component] = compErr
-		}
+// wmicAvailable reports whether wmic is on PATH. wmic was removed from
+// Windows 11 24H2 and Windows Server 2025, so skipping it avoids paying for
+// a failed process spawn before every PowerShell fallback.
+func wmicAvailable(logger *slog.Logger) bool {
+	if _, err := lookPath("wmic"); err != nil {
 		if logger != nil {
-			logger.Warn("component failed", "component", r.component, "error", r.err)
+			logger.Debug("wmic not found, using PowerShell", "error", err)
 		}
-		return identifiers
+
+		return false
 	}
 
-	if r.value == "" {
-		compErr := &ComponentError{Component: r.component, Err: ErrEmptyValue}
-		if diag != nil {
-			diag.Errors[r.component] = compErr
-		}
-		if logger != nil {
-			logger.Warn("component returned empty value", "component", r.component)
-		}
-		return identifiers
-	}
-
-	if diag != nil {
-		diag.Collected = append(diag.Collected, r.component)
-	}
-	if logger != nil {
-		logger.Info("component collected", "component", r.component)
-		logger.Debug("component value", "component", r.component, "value", r.value)
-	}
-
-	return append(identifiers, r.prefix+r.value)
+	return true
 }
 
-// appendMultiResult processes a multi-value component result into identifiers.
-func appendMultiResult(identifiers []string, r componentResult, diag *DiagnosticInfo, logger *slog.Logger) []string {
-	if r.err != nil {
-		compErr := &ComponentError{Component: r.component, Err: r.err}
-		if diag != nil {
-			diag.Errors[r.component] = compErr
-		}
-		if logger != nil {
-			logger.Warn("component failed", "component", r.component, "error", r.err)
-		}
-		return identifiers
-	}
+// runPowerShell executes a PowerShell script with the standard non-interactive flags.
+func runPowerShell(ctx context.Context, executor CommandExecutor, logger *slog.Logger, script string) (string, error) {
+	args := append(append([]string{}, powerShellArgs...), script)
 
-	if len(r.values) == 0 {
-		compErr := &ComponentError{Component: r.component, Err: ErrNoValues}
-		if diag != nil {
-			diag.Errors[r.component] = compErr
-		}
-		if logger != nil {
-			logger.Warn("component returned no values", "component", r.component)
-		}
-		return identifiers
-	}
-
-	if diag != nil {
-		diag.Collected = append(diag.Collected, r.component)
-	}
-	if logger != nil {
-		logger.Info("component collected", "component", r.component, "count", len(r.values))
-		logger.Debug("component values", "component", r.component, "values", r.values)
-	}
-
-	for _, value := range r.values {
-		identifiers = append(identifiers, r.prefix+value)
-	}
-
-	return identifiers
+	return executeCommand(ctx, executor, logger, "powershell", args...)
 }
 
 // parseWmicValue extracts value from wmic output with given prefix.
@@ -172,8 +93,8 @@ func parseWmicValue(output, prefix string) (string, error) {
 
 	for line := range lines {
 		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, prefix) {
-			value := strings.TrimSpace(strings.TrimPrefix(line, prefix))
+		if rest, ok := strings.CutPrefix(line, prefix); ok {
+			value := strings.TrimSpace(rest)
 			if value == "" || value == biosFirmwareMessage {
 				continue
 			}
@@ -192,8 +113,8 @@ func parseWmicMultipleValues(output, prefix string) []string {
 
 	for line := range lines {
 		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, prefix) {
-			value := strings.TrimSpace(strings.TrimPrefix(line, prefix))
+		if rest, ok := strings.CutPrefix(line, prefix); ok {
+			value := strings.TrimSpace(rest)
 			if value == "" || value == biosFirmwareMessage {
 				continue
 			}
@@ -237,12 +158,14 @@ func parsePowerShellMultipleValues(output string) []string {
 
 // windowsCPUID retrieves CPU processor ID using wmic, with PowerShell fallback.
 func windowsCPUID(ctx context.Context, executor CommandExecutor, logger *slog.Logger) (string, error) {
-	output, err := executeCommand(ctx, executor, logger, "wmic", "cpu", "get", "ProcessorId", "/value")
-	if err == nil {
-		if value, parseErr := parseWmicValue(output, "ProcessorId="); parseErr == nil {
-			return value, nil
-		} else if logger != nil {
-			logger.Debug("wmic CPU ID parsing failed", "error", parseErr)
+	if wmicAvailable(logger) {
+		output, err := executeCommand(ctx, executor, logger, "wmic", "cpu", "get", "ProcessorId", "/value")
+		if err == nil {
+			if value, parseErr := parseWmicValue(output, "ProcessorId="); parseErr == nil {
+				return value, nil
+			} else if logger != nil {
+				logger.Debug("wmic CPU ID parsing failed", "error", parseErr)
+			}
 		}
 	}
 
@@ -251,7 +174,7 @@ func windowsCPUID(ctx context.Context, executor CommandExecutor, logger *slog.Lo
 		logger.Info("falling back to PowerShell for CPU ID")
 	}
 
-	psOutput, psErr := executeCommand(ctx, executor, logger, "powershell", "-Command",
+	psOutput, psErr := runPowerShell(ctx, executor, logger,
 		"Get-CimInstance -ClassName Win32_Processor | Select-Object -ExpandProperty ProcessorId")
 	if psErr != nil {
 		if logger != nil {
@@ -266,12 +189,14 @@ func windowsCPUID(ctx context.Context, executor CommandExecutor, logger *slog.Lo
 
 // windowsMotherboardSerial retrieves motherboard serial number using wmic, with PowerShell fallback.
 func windowsMotherboardSerial(ctx context.Context, executor CommandExecutor, logger *slog.Logger) (string, error) {
-	output, err := executeCommand(ctx, executor, logger, "wmic", "baseboard", "get", "SerialNumber", "/value")
-	if err == nil {
-		if value, parseErr := parseWmicValue(output, "SerialNumber="); parseErr == nil {
-			return value, nil
-		} else if logger != nil {
-			logger.Debug("wmic motherboard serial parsing failed", "error", parseErr)
+	if wmicAvailable(logger) {
+		output, err := executeCommand(ctx, executor, logger, "wmic", "baseboard", "get", "SerialNumber", "/value")
+		if err == nil {
+			if value, parseErr := parseWmicValue(output, "SerialNumber="); parseErr == nil {
+				return value, nil
+			} else if logger != nil {
+				logger.Debug("wmic motherboard serial parsing failed", "error", parseErr)
+			}
 		}
 	}
 
@@ -280,7 +205,7 @@ func windowsMotherboardSerial(ctx context.Context, executor CommandExecutor, log
 		logger.Info("falling back to PowerShell for motherboard serial")
 	}
 
-	psOutput, psErr := executeCommand(ctx, executor, logger, "powershell", "-Command",
+	psOutput, psErr := runPowerShell(ctx, executor, logger,
 		"Get-CimInstance -ClassName Win32_BaseBoard | Select-Object -ExpandProperty SerialNumber")
 	if psErr != nil {
 		if logger != nil {
@@ -294,14 +219,25 @@ func windowsMotherboardSerial(ctx context.Context, executor CommandExecutor, log
 }
 
 // windowsSystemUUID retrieves system UUID using wmic or PowerShell.
+// Malformed, nil (all zeros) and max (all ones) UUIDs are rejected so the
+// fallback path is triggered.
 func windowsSystemUUID(ctx context.Context, executor CommandExecutor, logger *slog.Logger) (string, error) {
-	// Try wmic first
-	output, err := executeCommand(ctx, executor, logger, "wmic", "csproduct", "get", "UUID", "/value")
-	if err == nil {
-		if value, parseErr := parseWmicValue(output, "UUID="); parseErr == nil {
-			return value, nil
-		} else if logger != nil {
-			logger.Debug("wmic UUID parsing failed", "error", parseErr)
+	if wmicAvailable(logger) {
+		output, err := executeCommand(ctx, executor, logger, "wmic", "csproduct", "get", "UUID", "/value")
+		if err == nil {
+			value, parseErr := parseWmicValue(output, "UUID=")
+			switch {
+			case parseErr != nil:
+				if logger != nil {
+					logger.Debug("wmic UUID parsing failed", "error", parseErr)
+				}
+			case !isValidUUID(value):
+				if logger != nil {
+					logger.Debug("wmic returned invalid UUID, falling back", "uuid", value)
+				}
+			default:
+				return value, nil
+			}
 		}
 	}
 
@@ -314,26 +250,42 @@ func windowsSystemUUID(ctx context.Context, executor CommandExecutor, logger *sl
 }
 
 // windowsSystemUUIDViaPowerShell retrieves system UUID using PowerShell.
+// Malformed, nil and max UUIDs are rejected with ErrNotFound.
 func windowsSystemUUIDViaPowerShell(ctx context.Context, executor CommandExecutor, logger *slog.Logger) (string, error) {
-	output, err := executeCommand(ctx, executor, logger, "powershell", "-Command",
+	output, err := runPowerShell(ctx, executor, logger,
 		"Get-CimInstance -ClassName Win32_ComputerSystemProduct | Select-Object -ExpandProperty UUID")
 	if err != nil {
 		return "", err
 	}
 
-	return parsePowerShellValue(output)
+	value, err := parsePowerShellValue(output)
+	if err != nil {
+		return "", err
+	}
+
+	if !isValidUUID(value) {
+		if logger != nil {
+			logger.Debug("PowerShell returned invalid UUID", "uuid", value)
+		}
+
+		return "", &ParseError{Source: "PowerShell output", Err: ErrNotFound}
+	}
+
+	return value, nil
 }
 
 // windowsDiskSerials retrieves disk serial numbers using wmic, with PowerShell fallback.
 func windowsDiskSerials(ctx context.Context, executor CommandExecutor, logger *slog.Logger) ([]string, error) {
-	output, err := executeCommand(ctx, executor, logger, "wmic", "diskdrive", "get", "SerialNumber", "/value")
-	if err == nil {
-		if values := parseWmicMultipleValues(output, "SerialNumber="); len(values) > 0 {
-			return values, nil
-		}
+	if wmicAvailable(logger) {
+		output, err := executeCommand(ctx, executor, logger, "wmic", "diskdrive", "get", "SerialNumber", "/value")
+		if err == nil {
+			if values := parseWmicMultipleValues(output, "SerialNumber="); len(values) > 0 {
+				return values, nil
+			}
 
-		if logger != nil {
-			logger.Debug("wmic returned no disk serials")
+			if logger != nil {
+				logger.Debug("wmic returned no disk serials")
+			}
 		}
 	}
 
@@ -342,7 +294,7 @@ func windowsDiskSerials(ctx context.Context, executor CommandExecutor, logger *s
 		logger.Info("falling back to PowerShell for disk serials")
 	}
 
-	psOutput, psErr := executeCommand(ctx, executor, logger, "powershell", "-Command",
+	psOutput, psErr := runPowerShell(ctx, executor, logger,
 		"Get-CimInstance -ClassName Win32_DiskDrive | Select-Object -ExpandProperty SerialNumber")
 	if psErr != nil {
 		if logger != nil {

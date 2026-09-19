@@ -36,3 +36,5 @@ go.work.sum
 .DS_Store
 build/
 dist/
+# Local planning notes (not committed)
+.plan/

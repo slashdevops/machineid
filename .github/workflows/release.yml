@@ -22,10 +22,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: ./go.mod
 
@@ -38,10 +38,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: ./go.mod
 
@@ -50,7 +50,7 @@ jobs:
           GIT_VERSION=${{ github.ref_name }} GO_OS="linux" make build-dist
 
       - name: Install Cosign
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@v4
 
       - name: Sign Linux binaries with Cosign (keyless)
         run: |
@@ -64,7 +64,7 @@ jobs:
           done
 
       - name: Upload Linux distribution files
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: dist-linux
           path: ./dist/
@@ -75,10 +75,10 @@ jobs:
   #   runs-on: windows-latest
   #   steps:
   #     - name: Check out code
-  #       uses: actions/checkout@v6
+  #       uses: actions/checkout@v7
   #
   #     - name: Set up Go
-  #       uses: actions/setup-go@v6
+  #       uses: actions/setup-go@v7
   #       with:
   #         go-version-file: ./go.mod
   #
@@ -159,7 +159,7 @@ jobs:
   #         }
   #
   #     - name: Upload signed Windows artifacts
-  #       uses: actions/upload-artifact@v6
+  #       uses: actions/upload-artifact@v7
   #       with:
   #         name: dist-windows-signed
   #         path: ./dist/assets/
@@ -170,10 +170,10 @@ jobs:
     runs-on: macos-latest
     steps:
       - name: Check out code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: ./go.mod
 
@@ -275,7 +275,7 @@ jobs:
         run: security delete-keychain "$RUNNER_TEMP/build.keychain" || true
 
       - name: Upload macOS pkg artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: dist-macos
           path: ./dist/assets/
@@ -287,27 +287,27 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: ./go.mod
 
       - name: Download Linux distribution files
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: dist-linux
           path: ./dist/
 
       # - name: Download signed Windows artifacts
-      #   uses: actions/download-artifact@v7
+      #   uses: actions/download-artifact@v8
       #   with:
       #     name: dist-windows-signed
       #     path: ./dist/assets/
 
       - name: Download macOS pkg
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: dist-macos
           path: ./dist/assets/
@@ -322,7 +322,7 @@ jobs:
 
       - name: Create GitHub Release
         id: create-github-release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}

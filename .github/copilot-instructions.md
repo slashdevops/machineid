@@ -5,7 +5,7 @@ Follows these guidelines precisely to ensure consistency and maintainability of 
 
 ## Stack
 
-- Language: Go (Go 1.26+)
+- Language: Go (Go 1.27+)
 - Framework: Go standard library
 - Testing: Go's built-in testing package
 - Dependency Management: Go modules

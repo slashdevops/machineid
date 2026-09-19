@@ -2,7 +2,10 @@ package machineid
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -45,6 +48,13 @@ func newMockExecutor() *mockExecutor {
 		errorsByArgs:  make(map[string]error),
 		callCount:     make(map[string]int),
 	}
+}
+
+// calls returns how many times the named command was executed.
+func (m *mockExecutor) calls(command string) int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.callCount[command]
 }
 
 // argsKey builds the internal lookup key for an args-specific mock entry.
@@ -120,17 +130,172 @@ func (m *mockExecutor) setErrorForArgs(command string, args []string, err error)
 	m.errorsByArgs[argsKey(command, args)] = err
 }
 
-// TestExecuteTimeout tests that command execution respects timeout.
-func TestExecuteTimeout(t *testing.T) {
+// TestExecuteCancelledContext tests that an already-cancelled context is
+// reported as a CommandError wrapping context.Canceled.
+func TestExecuteCancelledContext(t *testing.T) {
 	executor := &defaultCommandExecutor{}
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
-	defer cancel()
-
-	time.Sleep(2 * time.Millisecond) // Ensure timeout expires
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
 
 	_, err := executor.Execute(ctx, "echo", "test")
 	if err == nil {
-		t.Error("Expected timeout error but got none")
+		t.Fatal("Expected error for cancelled context but got none")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("Expected context.Canceled in chain, got %v", err)
+	}
+	cmdErr, ok := errors.AsType[*CommandError](err)
+	if !ok {
+		t.Fatalf("Expected CommandError, got %T", err)
+	}
+	if cmdErr.Command != "echo" {
+		t.Errorf("Expected command 'echo', got %q", cmdErr.Command)
+	}
+}
+
+// TestExecuteDeadlineExceeded tests that a slow command is killed at the
+// timeout, that the error wraps context.DeadlineExceeded, and that WaitDelay
+// keeps Output from blocking past the deadline.
+func TestExecuteDeadlineExceeded(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("requires a POSIX sleep binary")
+	}
+
+	executor := &defaultCommandExecutor{Timeout: 50 * time.Millisecond}
+	start := time.Now()
+
+	_, err := executor.Execute(context.Background(), "sleep", "5")
+	elapsed := time.Since(start)
+
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("Expected context.DeadlineExceeded in chain, got %v", err)
+	}
+	if elapsed > 3*time.Second {
+		t.Errorf("Execute took %v; expected the timeout plus WaitDelay to bound it", elapsed)
+	}
+}
+
+// TestExecuteStderrExcerpt tests that a failing command's stderr is attached
+// to the CommandError.
+func TestExecuteStderrExcerpt(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("requires a POSIX shell")
+	}
+
+	executor := &defaultCommandExecutor{}
+	_, err := executor.Execute(context.Background(), "sh", "-c", "echo boom >&2; exit 3")
+
+	cmdErr, ok := errors.AsType[*CommandError](err)
+	if !ok {
+		t.Fatalf("Expected CommandError, got %T: %v", err, err)
+	}
+	if cmdErr.Stderr != "boom" {
+		t.Errorf("Expected stderr excerpt 'boom', got %q", cmdErr.Stderr)
+	}
+	if !strings.Contains(cmdErr.Error(), "boom") {
+		t.Errorf("Expected Error() to include stderr, got %q", cmdErr.Error())
+	}
+}
+
+func TestStderrExcerpt(t *testing.T) {
+	long := strings.Repeat("x", maxStderr+10)
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"empty", "", ""},
+		{"whitespace only", "  \n\n ", ""},
+		{"first non-empty line", "\n  first \nsecond", "first"},
+		{"truncated", long, long[:maxStderr] + "..."},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := stderrExcerpt([]byte(tt.in)); got != tt.want {
+				t.Errorf("stderrExcerpt(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+// --- memoExecutor tests ---
+
+func TestMemoExecutorRunsEachInvocationOnce(t *testing.T) {
+	mock := newMockExecutor()
+	mock.setOutputForArgs("system_profiler", []string{"SPHardwareDataType", "-json"}, "{}")
+	mock.setOutputForArgs("system_profiler", []string{"SPStorageDataType", "-json"}, "[]")
+	mock.setError("ioreg", fmt.Errorf("boom"))
+
+	memo := newMemoExecutor(mock, nil)
+	ctx := context.Background()
+
+	for range 3 {
+		out, err := memo.Execute(ctx, "system_profiler", "SPHardwareDataType", "-json")
+		if err != nil || out != "{}" {
+			t.Fatalf("Execute = %q, %v", out, err)
+		}
+	}
+	if _, err := memo.Execute(ctx, "system_profiler", "SPStorageDataType", "-json"); err != nil {
+		t.Fatal(err)
+	}
+	// Failures are cached too.
+	for range 2 {
+		if _, err := memo.Execute(ctx, "ioreg"); err == nil {
+			t.Fatal("Expected cached error")
+		}
+	}
+
+	if got := mock.calls("system_profiler"); got != 2 {
+		t.Errorf("Expected 2 distinct system_profiler runs, got %d", got)
+	}
+	if got := mock.calls("ioreg"); got != 1 {
+		t.Errorf("Expected 1 ioreg run, got %d", got)
+	}
+}
+
+func TestMemoExecutorConcurrentCallersShareOneRun(t *testing.T) {
+	mock := newMockExecutor()
+	mock.setOutput("slow", "value")
+	memo := newMemoExecutor(mock, nil)
+
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Go(func() {
+			if out, err := memo.Execute(context.Background(), "slow", "arg"); err != nil || out != "value" {
+				t.Errorf("Execute = %q, %v", out, err)
+			}
+		})
+	}
+	wg.Wait()
+
+	if got := mock.calls("slow"); got != 1 {
+		t.Errorf("Expected exactly 1 run for concurrent callers, got %d", got)
+	}
+}
+
+func TestMemoExecutorNilInnerUsesDefault(t *testing.T) {
+	memo := newMemoExecutor(nil, nil)
+	if memo.inner == nil {
+		t.Fatal("Expected default executor for nil inner")
+	}
+}
+
+func TestMemoExecutorLogsReuse(t *testing.T) {
+	var buf strings.Builder
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	mock := newMockExecutor()
+	mock.setOutput("cmd", "v")
+	memo := newMemoExecutor(mock, logger)
+
+	for range 2 {
+		if _, err := memo.Execute(context.Background(), "cmd"); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if !strings.Contains(buf.String(), "reusing command output") {
+		t.Errorf("Expected reuse log, got %q", buf.String())
 	}
 }
 
