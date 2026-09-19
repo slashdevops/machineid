@@ -40,7 +40,7 @@ func runUpdate(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 
 	method := fs.String("method", string(selfupdate.MethodAuto), "How to update: auto, release (signed GitHub asset) or go (go install)")
-	version := fs.String("version", "", "Install a specific release tag, e.g. v0.3.0 (also how to go back a version)")
+	version := fs.String("version", "", "Install a specific release tag, e.g. v0.1.3 (also how to go back a version)")
 	check := fs.Bool("check", false, "Report what would happen and exit without changing anything")
 	refresh := fs.Bool("refresh", false, "Bypass the one-hour cache and look up the latest release now (counts against the hourly budget)")
 	force := fs.Bool("force", false, "Install to the method's location even if this binary lives elsewhere, and reinstall an equal version")
@@ -211,7 +211,7 @@ func printUpdateUsage(w io.Writer, fs *flag.FlagSet) {
 	fmt.Fprintf(w, "\nExamples:\n")
 	fmt.Fprintf(w, "  %s update                     Check, show the plan, ask, install\n", applicationName)
 	fmt.Fprintf(w, "  %s update -check              What would happen; nothing changes\n", applicationName)
-	fmt.Fprintf(w, "  %s update -version v0.3.0     Install a specific release\n", applicationName)
+	fmt.Fprintf(w, "  %s update -version v0.1.3     Install a specific release\n", applicationName)
 	fmt.Fprintf(w, "  %s update -method go          Rebuild from source with go install\n", applicationName)
 	fmt.Fprintf(w, "  sudo %s update -yes           Non-interactive, e.g. for the macOS package\n", applicationName)
 	fmt.Fprintf(w, "\nExit Codes:\n")

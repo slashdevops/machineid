@@ -60,13 +60,13 @@ sudo machineid update -yes
 ```text
 $ machineid update
 Checking for updates…
-  ✓ current version          v0.2.0
+  ✓ current version          v0.1.3
   ✓ running binary           /usr/local/bin/machineid
   ✓ platform supported       darwin/arm64
-  ✓ latest release           v0.3.0  (live, 4 of 5 checks left this hour)
+  ✓ latest release           v0.2.0  (live, 4 of 5 checks left this hour)
   ✓ install target           /usr/local/bin (running as root)
 
-→ Updating machineid v0.2.0 → v0.3.0 using the signed macOS package
+→ Updating machineid v0.1.3 → v0.2.0 using the signed macOS package
 
 Update machineid now? [y/N] y
    downloading machineid-darwin-universal.pkg…
@@ -74,7 +74,7 @@ Update machineid now? [y/N] y
    ✓ pkgutil: Developer ID Installer: SlashDevOps
    ✓ installed to /usr/local/bin
 
-✅ Updated to v0.3.0
+✅ Updated to v0.2.0
 ```
 
 In order:
@@ -98,7 +98,7 @@ If anything fails before step 6, **nothing has been downloaded and nothing has c
 |------|---------|
 | `-check` | Report what would happen and exit. Nothing is downloaded. Uses the cached answer when it is under an hour old. |
 | `-refresh` | Look up the latest release now instead of using the cache. Counts against the hourly limit. |
-| `-version TAG` | Install exactly this release, e.g. `-version v0.2.0`. Works for older versions too. |
+| `-version TAG` | Install exactly this release, e.g. `-version v0.1.3`. Works for older versions too. |
 | `-method auto\|release\|go` | How to install. `auto` (default) uses `release` where a signed asset exists for your platform and `go` otherwise. See [Per-platform behaviour](#per-platform-behaviour). |
 | `-force` | Two things: install to the method's location even if this binary lives elsewhere, and reinstall a version that is already installed. |
 | `-yes` | Do not ask for confirmation. Required when stdin is not a terminal. |
@@ -168,13 +168,13 @@ machineid update -check
 
 ```text
 Checking for updates…
-  ✓ current version          v0.2.0
+  ✓ current version          v0.1.3
   ✓ running binary           /usr/local/bin/machineid
   ✓ platform supported       linux/amd64
-  ✓ latest release           v0.3.0  (cached 12m0s ago)
+  ✓ latest release           v0.2.0  (cached 12m0s ago)
   ✓ install target           /usr/local/bin (in place)
 
-→ Updating machineid v0.2.0 → v0.3.0 using the release archive machineid-linux-amd64.zip
+→ Updating machineid v0.1.3 → v0.2.0 using the release archive machineid-linux-amd64.zip
    (-check: nothing was changed)
 ```
 
@@ -187,7 +187,7 @@ Checking for updates…
 ## Installing a specific version, or going back
 
 ```bash
-machineid update -version v0.2.0
+machineid update -version v0.1.3
 ```
 
 An explicit tag is installed whether it is newer or older than what you have, so this is also how to **downgrade**. The tag must exist on the [releases page](https://github.com/slashdevops/machineid/releases) and carry an asset for your platform.
@@ -197,7 +197,7 @@ If you built `machineid` yourself, its version is something like `devel` or a br
 ```text
 Error: the running version "devel" is not a release version, so it cannot be compared with a release
 
-Name the release to install explicitly, e.g. machineid update -version v0.3.0
+Name the release to install explicitly, e.g. machineid update -version v0.2.0
 ```
 
 ---
@@ -290,7 +290,7 @@ When stdin is not a terminal and `-yes` is absent, the prompt **declines** rathe
 **Pin a version in CI:**
 
 ```bash
-machineid update -yes -version v0.3.0 -require-signature
+machineid update -yes -version v0.2.0 -require-signature
 ```
 
 **macOS with the `.pkg`:** run under `sudo`, or install once with `go install` and let the updater manage that copy in place.
@@ -327,14 +327,14 @@ Every error prints a **remedy** underneath it. The common ones:
 | `/opt/tools is not writable` | In-place replacement needs write access to the directory | Run with enough privileges, or `chown` the directory. |
 | `the running version "devel" is not a release version` | Locally built binary | `machineid update -version vX.Y.Z` |
 | `release "v9.9.9" was not found` | Typo, or the tag was never published | Check the releases page. |
-| `release v0.3.0 does not carry machineid-linux-arm64.zip` | That release was published without your platform's asset | Pick another `-version`, or `-method go`. |
+| `release v0.2.0 does not carry machineid-linux-arm64.zip` | That release was published without your platform's asset | Pick another `-version`, or `-method go`. |
 | `does not match its published SHA-256` | Corrupt or tampered download; nothing installed | Retry. If it persists, open an issue. |
 | `signature verification of … with cosign failed` | The bundle does not verify | Do **not** install. Retry; if it persists, open an issue. |
 | `signature verification … cosign is not installed (-require-signature)` | You demanded a signature but have no `cosign` | Install cosign, or drop the flag. |
 | `no release asset is published for windows/amd64` | No Windows binaries yet | `machineid update -method go` (needs Go). |
 | `go is not installed` | `-method go` without a toolchain | Install Go, or use `-method release`. |
 | `stdin is not a terminal; pass -yes to update without confirmation` | Piped or scripted run without `-yes` | Add `-yes`. |
-| `… reports v0.2.0, not the v0.3.0 just installed` | The install landed somewhere other than the binary on your PATH | Check `which machineid`; you probably have two copies. |
+| `… reports v0.1.3, not the v0.2.0 just installed` | The install landed somewhere other than the binary on your PATH | Check `which machineid`; you probably have two copies. |
 
 `-debug` prints every command and every request, which is the fastest way to see what a failing run actually did.
 

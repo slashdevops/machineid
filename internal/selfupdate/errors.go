@@ -56,7 +56,7 @@ func (e *NotComparableError) Error() string {
 }
 
 func (e *NotComparableError) Remedy() string {
-	return "Name the release to install explicitly, e.g. " + ToolName + " update -version v0.3.0"
+	return "Name the release to install explicitly, e.g. " + ToolName + " update -version v0.2.0"
 }
 
 // UnsupportedPlatformError is returned when no release asset exists for the platform.
